@@ -99,6 +99,7 @@ export class App {
   protected readonly latestPrices = signal<Record<string, number>>({});
   protected readonly recordQuoteLoading = signal('');
   protected readonly recordQuoteError = signal('');
+  protected readonly pendingStockRecordDelete = signal<string | null>(null);
   protected readonly requestedDate = signal(this.todayInputValue());
   protected readonly chartDays = signal(20);
   protected readonly limitUpPrice = signal(685);
@@ -364,6 +365,18 @@ export class App {
   protected readonly currentStockPresetOrders = computed(() =>
     this.presetOrders().filter((order) => order.symbol === this.stockSymbol()),
   );
+
+  protected readonly sellableFormStockPositions = computed(() => {
+    const symbol = this.positionForm().symbol.trim();
+    return this.tradePositions().filter((position) =>
+      position.symbol === symbol && (position.type === '現股多單' || position.type === '融資'));
+  });
+
+  protected readonly sellableFormStockShares = computed(() =>
+    this.sellableFormStockPositions().reduce((total, position) => total + position.shares, 0),
+  );
+
+  protected readonly canCreateSellPreset = computed(() => this.sellableFormStockShares() > 0);
 
   protected readonly visibleHoldingPositions = computed(() => this.holdingViewMode() === 'current'
     ? this.currentStockPositions() : this.tradePositions());
@@ -734,8 +747,12 @@ export class App {
   }
 
   protected onPresetOrderActionChange(value: PresetOrderAction): void {
+    if (value === 'sell' && !this.canCreateSellPreset()) return;
     this.presetOrderAction.set(value);
-    this.positionForm.update((form) => ({ ...form, type: value === 'sell' ? '空單' : '現股多單' }));
+    if (value === 'sell') {
+      const holding = this.sellableFormStockPositions()[0];
+      this.positionForm.update((form) => ({ ...form, type: holding.type, shares: Math.min(form.shares, this.sellableFormStockShares()) }));
+    }
   }
 
   protected onShareUnitChange(value: 'boardLot' | 'oddLot'): void {
@@ -886,21 +903,57 @@ export class App {
     this.loadCurrentPrice();
   }
 
+  protected requestRemoveStockRecord(symbol: string, event: MouseEvent): void {
+    event.stopPropagation();
+    this.pendingStockRecordDelete.set(symbol);
+  }
+
+  protected cancelRemoveStockRecord(event: MouseEvent): void {
+    event.stopPropagation();
+    this.pendingStockRecordDelete.set(null);
+  }
+
   protected removeStockRecord(symbol: string, event: MouseEvent): void {
     event.stopPropagation();
-    this.stockRecords.update((records) => records.filter((record) => record.symbol !== symbol));
+    const remainingRecords = this.stockRecords().filter((record) => record.symbol !== symbol);
+    this.stockRecords.set(remainingRecords);
+    this.latestPrices.update((prices) => {
+      const { [symbol]: _removed, ...remaining } = prices;
+      return remaining;
+    });
+    this.pendingStockRecordDelete.set(null);
+
+    if (this.stockSymbol() !== symbol) return;
+    const nextRecord = remainingRecords[0];
+    if (nextRecord) {
+      this.selectStockRecord(nextRecord);
+      return;
+    }
+
+    this.stockSymbol.set('');
+    this.stockName.set('');
+    this.latestPrice.set(0);
+    this.quoteChange.set(0);
+    this.quoteDate.set('');
+    this.history.set([]);
+    this.positionForm.update((form) => ({ ...form, symbol: '' }));
   }
 
   protected createPresetOrderFromForm(): void {
     const form = this.positionForm();
     const symbol = form.symbol.trim();
     if (!symbol) return;
+    const action = this.presetOrderAction();
+    if (action === 'sell' && !this.canCreateSellPreset()) return;
+    const shares = action === 'sell'
+      ? Math.min(this.normalizedOrderShares(form.shares), this.sellableFormStockShares())
+      : this.normalizedOrderShares(form.shares);
     this.presetOrders.update((orders) => [...orders, {
       id: `preset-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       symbol,
       type: form.type,
-      action: this.presetOrderAction(),
-      shares: this.normalizedOrderShares(form.shares),
+      action,
+      shares,
       entryPrice: Math.max(form.entryPrice, 1),
       exitPrice: form.targetPrice > 0 ? form.targetPrice : undefined,
       validDays: Math.max(this.nearTermDays(), 1),
@@ -930,6 +983,7 @@ export class App {
   }
 
   protected presetProfit(order: PresetOrder): number {
+    if (order.action === 'sell') return this.sellHoldingProfit(order, order.entryPrice);
     return this.portfolioCalculator.simulateOrder(
       order.entryPrice, order.exitPrice ?? order.entryPrice, order.type, order.shares, order.validDays,
       this.financingRate(), this.shortBorrowRate(),
@@ -1140,6 +1194,22 @@ export class App {
     return Math.max(Math.round(duration / 86_400_000), 1);
   }
 
+  private sellHoldingProfit(order: PresetOrder, salePrice: number): number {
+    const positions = this.tradePositions().filter((position) =>
+      position.symbol === order.symbol && (position.type === '現股多單' || position.type === '融資'));
+    let remainingShares = order.shares;
+    let profit = 0;
+    for (const position of positions) {
+      if (remainingShares <= 0) break;
+      const shares = Math.min(position.shares, remainingShares);
+      profit += this.portfolioCalculator.simulateOrder(
+        position.entryPrice, salePrice, position.type, shares, order.validDays,
+        this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+      );
+      remainingShares -= shares;
+    }
+    return profit;
+  }
   private buildStockStressScenario(id: string, name: string, assumption: string, shock: number, respectStops: boolean): StressScenario {
     const scenarioPrice = this.valuationPrice() * (1 + shock);
     const holdingProfit = this.currentStockPositions().reduce((total, position) => {
@@ -1153,10 +1223,13 @@ export class App {
         this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
       );
     }, 0);
-    const presetProfit = this.currentStockPresetOrders().reduce((total, order) => total + this.portfolioCalculator.simulateOrder(
-      order.entryPrice, this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops), order.type, order.shares, order.validDays,
-      this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-    ), 0);
+    const presetProfit = this.currentStockPresetOrders().reduce((total, order) => {
+      if (order.action === 'sell') return total + (scenarioPrice >= order.entryPrice ? this.sellHoldingProfit(order, order.entryPrice) : 0);
+      return total + this.portfolioCalculator.simulateOrder(
+        order.entryPrice, this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops), order.type, order.shares, order.validDays,
+        this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+      );
+    }, 0);
     const totalProfit = holdingProfit + presetProfit;
     const stressedExposure = scenarioPrice * (
       this.currentStockHoldingShares() + this.currentStockPresetOrders().reduce((sum, order) => sum + order.shares, 0)

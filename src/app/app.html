@@ -43,7 +43,15 @@
         <div class="stock-record-card" [class.active]="stockSymbol() === record.symbol" role="button" tabindex="0" (click)="selectStockRecord(record)" (keydown.enter)="selectStockRecord(record)">
           <div><strong>{{ record.symbol }}</strong><span>{{ record.name }}</span></div>
           <div class="record-price"><strong>{{ record.latestPrice | number:'1.0-2' }}</strong><span [class.positive]="record.change >= 0" [class.negative]="record.change < 0">{{ record.change >= 0 ? '+' : '' }}{{ record.change | number:'1.0-2' }}</span></div>
-          <button type="button" class="record-remove" (click)="removeStockRecord(record.symbol, $event)" [attr.aria-label]="'移除 ' + record.symbol">×</button>
+                    @if (pendingStockRecordDelete() === record.symbol) {
+            <div class="record-delete-confirm" (click)="$event.stopPropagation()">
+              <span>僅刪除追蹤記錄，持倉與預設單會保留</span>
+              <button type="button" class="ghost-button confirm" (click)="removeStockRecord(record.symbol, $event)">確認刪除</button>
+              <button type="button" class="ghost-button" (click)="cancelRemoveStockRecord($event)">取消</button>
+            </div>
+          } @else {
+            <button type="button" class="record-remove" (click)="requestRemoveStockRecord(record.symbol, $event)" [attr.aria-label]="'刪除 ' + record.symbol + ' 個股記錄'">刪除</button>
+          }
         </div>
       } @empty {
         <p class="record-empty">輸入股票代號，建立第一筆股票記錄。</p>
@@ -265,13 +273,13 @@
                 <span>下單方式</span>
                 <select [value]="presetOrderAction()" (change)="onPresetOrderActionChange($any($event.target).value)">
                   <option value="buy">買入</option>
-                  <option value="sell">賣出</option>
+                  <option value="sell" [disabled]="!canCreateSellPreset()">賣出（限已有持倉）</option>
                 </select>
               </label>
             }
             <label class="field">
               <span>{{ orderEntryMode() === 'preset' ? '交易類型' : '持倉方向' }}</span>
-              <select [value]="positionForm().type" (change)="onPositionFieldChange('type', $any($event.target).value)">
+              <select [value]="positionForm().type" [disabled]="orderEntryMode() === 'preset' && presetOrderAction() === 'sell'" (change)="onPositionFieldChange('type', $any($event.target).value)">
                 @for (item of orderOptions; track item.value) {
                   <option [value]="item.value">{{ item.label }}</option>
                 }

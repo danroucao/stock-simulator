@@ -91,7 +91,7 @@ describe('App', () => {
     expect(compiled.querySelectorAll('.preset-marker').length).toBe(1);
   });
 
-  it('should create a sell preset order without stop loss or expected exit price', async () => {
+  it('should create a sell preset from an existing holding without opening a short', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const app = fixture.componentInstance as any;
@@ -103,10 +103,35 @@ describe('App', () => {
 
     const order = app.presetOrders().at(-1);
     expect(order.action).toBe('sell');
-    expect(order.type).toBe('空單');
+    expect(order.type).toBe('現股多單');
     expect(order.exitPrice).toBeUndefined();
     expect(order.stopLossPrice).toBeUndefined();
     expect((fixture.nativeElement as HTMLElement).querySelector('.preset-order-row')?.textContent).toContain('未設定出場價');
+  });
+  it('should prevent sell preset orders when the selected stock has no sellable holding', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    app.stockSymbol.set('6182');
+    app.positionForm.update((form: any) => ({ ...form, symbol:'6182' }));
+    app.presetOrderAction.set('buy');
+    app.onPresetOrderActionChange('sell');
+    app.createPresetOrderFromForm();
+
+    expect(app.presetOrderAction()).toBe('buy');
+    expect(app.presetOrders().some((order: any) => order.symbol === '6182' && order.action === 'sell')).toBe(false);
+  });
+  it('should validate a sell preset against the symbol entered in the form', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    app.orderEntryMode.set('preset');
+    app.positionForm.update((form: any) => ({ ...form, symbol: '6182' }));
+
+    app.onPresetOrderActionChange('sell');
+
+    expect(app.presetOrderAction()).toBe('buy');
+    expect(app.canCreateSellPreset()).toBe(false);
   });
   it('should value existing positions with the latest quote instead of the simulated entry price', async () => {
     const fixture = TestBed.createComponent(App);
@@ -207,6 +232,30 @@ describe('App', () => {
     expect((compiled.querySelector('.board-form input[type="text"]') as HTMLInputElement).value).toBe('2317');
   });
 
+  it('should confirm and delete a stock record while preserving investment data', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    const event = { stopPropagation: vi.fn() } as any;
+    app.stockRecords.set([
+      { symbol:'2330',name:'台積電',latestPrice:650,change:1,quoteDate:'115/07/31' },
+      { symbol:'6182',name:'合晶',latestPrice:89,change:4.3,quoteDate:'115/07/31' },
+    ]);
+    app.latestPrices.set({ '2330':650, '6182':89 });
+    app.stockSymbol.set('2330');
+    app.tradePositions.set([{ id:'holding',symbol:'2330',type:'現股多單',shares:1000,entryPrice:600,targetPrice:0,note:'' }]);
+    app.presetOrders.set([{ id:'preset',symbol:'2330',type:'現股多單',action:'buy',shares:1000,entryPrice:620,validDays:5,createdAt:'2026-08-01' }]);
+
+    app.requestRemoveStockRecord('2330', event);
+    expect(app.pendingStockRecordDelete()).toBe('2330');
+    app.removeStockRecord('2330', event);
+
+    expect(app.stockRecords().map((record: any) => record.symbol)).toEqual(['6182']);
+    expect(app.latestPrices()['2330']).toBeUndefined();
+    expect(app.stockSymbol()).toBe('6182');
+    expect(app.tradePositions().length).toBe(1);
+    expect(app.presetOrders().length).toBe(1);
+  });
   it('should show every holding summary while valuing each stock with its latest price', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
