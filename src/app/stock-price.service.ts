@@ -44,7 +44,8 @@ export interface StockHistoryPoint extends StockQuote {}
 @Injectable({ providedIn: 'root' })
 export class StockPriceService {
   private readonly requestUrl = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY';
-  private readonly tpexQuotesUrl = '/api/tpex/openapi/v1/tpex_mainboard_daily_close_quotes';
+  private readonly tpexProxyUrl = this.getTpexProxyUrl();
+  private readonly tpexQuotesUrl = `${this.tpexProxyUrl}/openapi/v1/tpex_mainboard_daily_close_quotes`;
   private tpexQuotesCache?: Observable<TpexDailyQuote[]>;
 
   constructor(private readonly http: HttpClient) {}
@@ -92,7 +93,7 @@ export class StockPriceService {
       const year = date.slice(0, 4);
       const month = date.slice(4, 6);
       return this.http.get<TpexHistoryResponse>(
-        `/api/tpex/www/zh-tw/afterTrading/tradingStock?code=${symbol}&date=${year}/${month}/01`,
+        `${this.tpexProxyUrl}/www/zh-tw/afterTrading/tradingStock?code=${symbol}&date=${year}/${month}/01`,
       ).pipe(catchError(() => of({ tables: [] } as TpexHistoryResponse)));
     });
 
@@ -153,6 +154,13 @@ export class StockPriceService {
       }),
       catchError(() => of(null)),
     );
+  }
+
+  private getTpexProxyUrl(): string {
+    const configuredUrl = (globalThis as typeof globalThis & {
+      __STOCK_APP_CONFIG__?: { tpexProxyUrl?: string };
+    }).__STOCK_APP_CONFIG__?.tpexProxyUrl?.trim();
+    return (configuredUrl || '/api/tpex').replace(/\/$/, '');
   }
 
   private mapQuote(response: TwseStockResponse, requestDate?: string): StockQuote | null {
