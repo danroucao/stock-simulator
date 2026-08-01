@@ -1,4 +1,4 @@
-﻿<main class="dashboard">
+<main class="dashboard">
   <section class="hero-card">
     <div class="hero-copy">
       <span class="eyebrow">股票下單模擬器</span>
@@ -260,8 +260,17 @@
             @if (orderEntryMode() === 'holding') {
               <label class="field"><span>入倉日期</span><input type="date" [value]="positionForm().tradeDate" (change)="onPositionFieldChange('tradeDate', $any($event.target).value)" /></label>
             }
+            @if (orderEntryMode() === 'preset') {
+              <label class="field">
+                <span>下單方式</span>
+                <select [value]="presetOrderAction()" (change)="onPresetOrderActionChange($any($event.target).value)">
+                  <option value="buy">買入</option>
+                  <option value="sell">賣出</option>
+                </select>
+              </label>
+            }
             <label class="field">
-              <span>持倉方向</span>
+              <span>{{ orderEntryMode() === 'preset' ? '交易類型' : '持倉方向' }}</span>
               <select [value]="positionForm().type" (change)="onPositionFieldChange('type', $any($event.target).value)">
                 @for (item of orderOptions; track item.value) {
                   <option [value]="item.value">{{ item.label }}</option>
@@ -280,12 +289,12 @@
               <input type="number" [value]="positionForm().shares" [min]="shareUnit() === 'boardLot' ? 1000 : 1" [max]="shareUnit() === 'oddLot' ? 999 : null" [step]="shareUnit() === 'boardLot' ? 1000 : 1" (input)="onPositionFieldChange('shares', +($any($event.target).value || 1))" />
             </label>
             <label class="field">
-              <span>買入價</span>
+              <span>{{ orderEntryMode() === 'preset' && presetOrderAction() === 'sell' ? '賣出價' : '買入價' }}</span>
               <input type="number" [value]="positionForm().entryPrice" min="1" (input)="onPositionFieldChange('entryPrice', +($any($event.target).value || 1))" />
             </label>
-            <label class="field"><span>停損價</span><input type="number" [value]="positionForm().stopLossPrice || limitDownPrice()" min="0.01" (input)="onPositionFieldChange('stopLossPrice', +($any($event.target).value || 0.01))" /></label>
+            <label class="field"><span>停損價（選填）</span><input type="number" [value]="positionForm().stopLossPrice ?? ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('stopLossPrice', $any($event.target).value ? +$any($event.target).value : undefined)" /></label>
             @if (orderEntryMode() === 'preset') {
-              <label class="field"><span>預測出場價</span><input type="number" [value]="positionForm().targetPrice" min="1" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 1))" /></label>
+              <label class="field"><span>預計出場價（選填）</span><input type="number" [value]="positionForm().targetPrice || ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 0))" /></label>
               <label class="field"><span>預設單有效日</span><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /><small>可選今日起 5 個交易日，不含週六、日</small></label>
             }
             <label class="field">
@@ -315,7 +324,7 @@
           <div class="preset-list-title"><h3>近期預設單</h3><span>虛線菱形已同步顯示於座標圖</span></div>
           @for (order of currentStockPresetOrders(); track order.id) {
             <div class="preset-order-row">
-              <span class="preset-status">待觸發</span><strong>{{ order.symbol }} · {{ order.type }}</strong><span>進場 {{ order.entryPrice | number:'1.0-2' }}</span><span>停利 {{ order.exitPrice | number:'1.0-2' }}</span><span>{{ order.shareUnit === 'oddLot' ? '零股' : '整張' }} · {{ order.shares | number:'1.0-0' }} 股</span><span>有效至 {{ order.expiryDate || order.validDays + ' 天' }}</span><strong class="positive">+{{ presetProfit(order) | number:'1.0-0' }}</strong><button type="button" class="ghost-button" (click)="removePresetOrder(order.id)">取消</button>
+              <span class="preset-status">{{ order.action === 'sell' ? '預設賣出' : '預設買入' }}</span><strong>{{ order.symbol }} · {{ order.type }}</strong><span>進場 {{ order.entryPrice | number:'1.0-2' }}</span><span>{{ order.exitPrice ? ('預計出場 ' + (order.exitPrice | number:'1.0-2')) : '未設定出場價' }}</span><span>{{ order.shareUnit === 'oddLot' ? '零股' : '整張' }} · {{ order.shares | number:'1.0-0' }} 股</span><span>有效至 {{ order.expiryDate || order.validDays + ' 天' }}</span><strong class="positive">+{{ presetProfit(order) | number:'1.0-0' }}</strong><button type="button" class="ghost-button" (click)="removePresetOrder(order.id)">取消</button>
             </div>
           }
         </section>

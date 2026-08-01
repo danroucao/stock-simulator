@@ -28,13 +28,16 @@ export interface PositionInlineChange {
   value: string | number;
 }
 
+export type PresetOrderAction = 'buy' | 'sell';
+
 export interface PresetOrder {
   id: string;
   symbol: string;
   type: OrderType;
+  action?: PresetOrderAction;
   shares: number;
   entryPrice: number;
-  exitPrice: number;
+  exitPrice?: number;
   validDays: number;
   createdAt: string;
   expiryDate?: string;

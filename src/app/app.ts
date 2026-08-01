@@ -1,8 +1,8 @@
-﻿import { DecimalPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { Component, computed, signal } from '@angular/core';
 
 import { PositionDetails } from './components/position-details/position-details';
-import { BacktestResult, ClosedTrade, OrderType, PositionInlineChange, PresetOrder, TradePosition, TradePositionInput } from './models/trade-position.model';
+import { BacktestResult, ClosedTrade, OrderType, PositionInlineChange, PresetOrder, PresetOrderAction, TradePosition, TradePositionInput } from './models/trade-position.model';
 import { PortfolioCalculatorService } from './services/portfolio-calculator.service';
 import { StockHistoryPoint, StockPriceService } from './stock-price.service';
 
@@ -126,6 +126,7 @@ export class App {
   protected readonly draggingBoardMarker = signal<string | null>(null);
   protected readonly editingPositionId = signal<string | null>(null);
   protected readonly orderEntryMode = signal<'holding' | 'preset'>('holding');
+  protected readonly presetOrderAction = signal<PresetOrderAction>('buy');
   protected readonly shareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly simulationShareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly collapsedPanels = signal<Set<string>>(new Set());
@@ -258,7 +259,7 @@ export class App {
   ));
 
   protected readonly pendingOrderCapital = computed(() => this.presetOrders().reduce(
-    (total, order) => total + order.entryPrice * order.shares, 0,
+    (total, order) => total + (order.action === 'sell' ? 0 : order.entryPrice * order.shares), 0,
   ));
 
   protected readonly cashAfterPendingOrders = computed(() => this.availableCash() - this.pendingOrderCapital());
@@ -272,19 +273,30 @@ export class App {
     })).map((item) => ({ ...item, weight: item.value / total * 100 })).sort((left, right) => right.weight - left.weight);
   });
 
-  protected readonly proposedStopLoss = computed(() => Math.max(this.positionForm().stopLossPrice ?? this.limitDownPrice(), 0.01));
-  protected readonly suggestedRiskShares = computed(() => this.portfolioCalculator.recommendedShares(
-    this.positionForm().entryPrice, this.proposedStopLoss(), this.maxRiskPerTrade(), this.feeDiscount(),
-  ));
-  protected readonly proposedOrderRisk = computed(() => Math.abs(this.portfolioCalculator.simulateOrder(
-    this.positionForm().entryPrice, this.proposedStopLoss(), this.positionForm().type, this.positionForm().shares, 1,
-    this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-  )));
-  protected readonly proposedOrderReward = computed(() => Math.max(this.portfolioCalculator.simulateOrder(
-    this.positionForm().entryPrice, this.positionForm().targetPrice, this.positionForm().type, this.positionForm().shares,
-    this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-  ), 0));
-  protected readonly proposedRiskRewardRatio = computed(() => this.proposedOrderRisk() > 0
+  protected readonly proposedStopLoss = computed(() => {
+    const value = this.positionForm().stopLossPrice;
+    return value && value > 0 ? value : undefined;
+  });
+  protected readonly suggestedRiskShares = computed(() => {
+    const stopLoss = this.proposedStopLoss();
+    return stopLoss === undefined ? 0 : this.portfolioCalculator.recommendedShares(
+      this.positionForm().entryPrice, stopLoss, this.maxRiskPerTrade(), this.feeDiscount(),
+    );
+  });
+  protected readonly proposedOrderRisk = computed(() => {
+    const stopLoss = this.proposedStopLoss();
+    return stopLoss === undefined ? 0 : Math.abs(this.portfolioCalculator.simulateOrder(
+      this.positionForm().entryPrice, stopLoss, this.positionForm().type, this.positionForm().shares, 1,
+      this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+    ));
+  });
+  protected readonly proposedOrderReward = computed(() => {
+    const targetPrice = this.positionForm().targetPrice;
+    return targetPrice > 0 ? Math.max(this.portfolioCalculator.simulateOrder(
+      this.positionForm().entryPrice, targetPrice, this.positionForm().type, this.positionForm().shares,
+      this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+    ), 0) : 0;
+  });  protected readonly proposedRiskRewardRatio = computed(() => this.proposedOrderRisk() > 0
     ? this.proposedOrderReward() / this.proposedOrderRisk() : 0);
 
   protected readonly backtestResult = computed<BacktestResult>(() => this.portfolioCalculator.backtest(
@@ -721,6 +733,11 @@ export class App {
     this.positionForm.update((current) => ({ ...current, [field]: value }));
   }
 
+  protected onPresetOrderActionChange(value: PresetOrderAction): void {
+    this.presetOrderAction.set(value);
+    this.positionForm.update((form) => ({ ...form, type: value === 'sell' ? '空單' : '現股多單' }));
+  }
+
   protected onShareUnitChange(value: 'boardLot' | 'oddLot'): void {
     this.shareUnit.set(value);
     this.positionForm.update((form) => ({
@@ -882,9 +899,10 @@ export class App {
       id: `preset-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       symbol,
       type: form.type,
+      action: this.presetOrderAction(),
       shares: this.normalizedOrderShares(form.shares),
       entryPrice: Math.max(form.entryPrice, 1),
-      exitPrice: Math.max(form.targetPrice, 1),
+      exitPrice: form.targetPrice > 0 ? form.targetPrice : undefined,
       validDays: Math.max(this.nearTermDays(), 1),
       createdAt: new Date().toISOString(),
       expiryDate: this.presetExpiryDate(),
@@ -899,7 +917,7 @@ export class App {
     const isShort = type === '空單' || type === '融券';
     this.presetOrders.update((orders) => [...orders, {
       id: `preset-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-      symbol: this.stockSymbol(), type, shares: this.normalizedSimulationShares(), entryPrice,
+      symbol: this.stockSymbol(), type, action: isShort ? 'sell' : 'buy', shares: this.normalizedSimulationShares(), entryPrice,
       exitPrice: isShort ? this.minPrice() : this.maxPrice(),
       validDays: this.nearTermDays(), createdAt: new Date().toISOString(),
       expiryDate: this.presetExpiryDate(),
@@ -913,7 +931,7 @@ export class App {
 
   protected presetProfit(order: PresetOrder): number {
     return this.portfolioCalculator.simulateOrder(
-      order.entryPrice, order.exitPrice, order.type, order.shares, order.validDays,
+      order.entryPrice, order.exitPrice ?? order.entryPrice, order.type, order.shares, order.validDays,
       this.financingRate(), this.shortBorrowRate(),
     );
   }

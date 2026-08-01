@@ -87,10 +87,27 @@ describe('App', () => {
     const button = compiled.querySelector('.form-submit') as HTMLButtonElement;
     button.click();
     fixture.detectChanges();
-    expect(compiled.querySelector('.preset-order-row')?.textContent).toContain('待觸發');
+    expect(compiled.querySelector('.preset-order-row')?.textContent).toContain('預設買入');
     expect(compiled.querySelectorAll('.preset-marker').length).toBe(1);
   });
 
+  it('should create a sell preset order without stop loss or expected exit price', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    app.orderEntryMode.set('preset');
+    app.onPresetOrderActionChange('sell');
+    app.positionForm.update((form: any) => ({ ...form, targetPrice: 0, stopLossPrice: undefined }));
+    app.createPresetOrderFromForm();
+    fixture.detectChanges();
+
+    const order = app.presetOrders().at(-1);
+    expect(order.action).toBe('sell');
+    expect(order.type).toBe('空單');
+    expect(order.exitPrice).toBeUndefined();
+    expect(order.stopLossPrice).toBeUndefined();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.preset-order-row')?.textContent).toContain('未設定出場價');
+  });
   it('should value existing positions with the latest quote instead of the simulated entry price', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
@@ -160,11 +177,11 @@ describe('App', () => {
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.stock-chart rect')?.hasAttribute('rx')).toBe(false);
-    expect(compiled.querySelector('.board-form')?.textContent).not.toContain('預測出場價');
+    expect(compiled.querySelector('.board-form')?.textContent).not.toContain('預計出場價（選填）');
     const presetMode = Array.from(compiled.querySelectorAll('.order-mode-switch button')).find((button) => button.textContent?.includes('建立近期預設單')) as HTMLButtonElement;
     presetMode.click();
     fixture.detectChanges();
-    expect(compiled.querySelector('.board-form')?.textContent).toContain('預測出場價');
+    expect(compiled.querySelector('.board-form')?.textContent).toContain('預計出場價（選填）');
     expect(compiled.querySelector('.board-form')?.textContent).not.toContain('入倉日期');
   });
 
