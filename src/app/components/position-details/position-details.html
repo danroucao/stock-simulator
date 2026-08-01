@@ -1,0 +1,41 @@
+<section class="position-detail-section" aria-labelledby="position-detail-title">
+  <div class="detail-section-heading">
+    <div><span class="section-eyebrow">持倉模擬面板延伸</span><h3 id="position-detail-title">持倉筆記與實際盈虧</h3></div>
+    <span>已入倉部位依最新股價逐筆計算</span>
+  </div>
+
+  @for (group of groups(); track group.symbol) {
+    <article class="position-group" [class.expanded]="expandedSymbols().has(group.symbol)">
+      <button type="button" class="position-group-header" (click)="toggle(group.symbol)" [attr.aria-expanded]="expandedSymbols().has(group.symbol)">
+        <span class="group-chevron">›</span>
+        <span class="group-symbol"><strong>{{ group.symbol }}</strong><small>{{ group.positions.length }} 筆持倉 · {{ group.shares | number:'1.0-0' }} 股</small></span>
+        <span><small>投入成本</small><strong>{{ group.cost | number:'1.0-0' }}</strong></span>
+        <span><small>目前價格</small><strong>{{ marketPriceFor(group.symbol) | number:'1.0-2' }}</strong></span>
+        <span><small>實際盈虧</small><strong [class.positive]="group.profit >= 0" [class.negative]="group.profit < 0">{{ group.profit >= 0 ? '+' : '' }}{{ group.profit | number:'1.0-0' }}</strong></span>
+      </button>
+
+      @if (expandedSymbols().has(group.symbol)) {
+        <div class="position-group-body"><div class="position-profit-table-wrap"><table class="position-profit-table">
+          <thead><tr><th>方向</th><th>股數</th><th>買入價</th><th>投入成本</th><th>目前市值</th><th>實際盈虧</th><th>報酬率</th></tr></thead>
+          <tbody>
+            @for (position of group.positions; track position.id) {
+              <tr>
+                <td><span class="type-pill">{{ position.type }}</span></td><td>{{ position.shares | number:'1.0-0' }}</td><td>{{ position.entryPrice | number:'1.0-2' }}</td><td>{{ cost(position) | number:'1.0-0' }}</td><td>{{ marketValue(position) | number:'1.0-0' }}</td>
+                <td [class.positive]="profit(position) >= 0" [class.negative]="profit(position) < 0">{{ profit(position) >= 0 ? '+' : '' }}{{ profit(position) | number:'1.0-0' }}</td>
+                <td [class.positive]="profit(position) >= 0" [class.negative]="profit(position) < 0">{{ profit(position) / cost(position) * 100 | number:'1.2-2' }}%</td>
+              </tr>
+              <tr class="inline-edit-row">
+                <td colspan="3"><label>持倉筆記<input type="text" [value]="position.note" (input)="update(position.id, 'note', $any($event.target).value)" placeholder="輸入交易想法或停損條件" /></label></td>
+                <td colspan="2"><label>目標價<input type="number" min="1" [value]="position.targetPrice" (input)="update(position.id, 'targetPrice', +($any($event.target).value || 1))" /></label></td>
+                <td colspan="2"><span class="target-hint">距目標 {{ ((position.targetPrice - marketPriceFor(position.symbol)) / marketPriceFor(position.symbol) * 100) | number:'1.1-1' }}%</span></td>
+              </tr>
+              <tr class="position-actions-row"><td colspan="7"><button type="button" class="close-position-button" (click)="positionClose.emit(position)">以目前市價平倉</button></td></tr>
+            }
+          </tbody>
+        </table></div></div>
+      }
+    </article>
+  } @empty {
+    <div class="empty-position-detail">新增持倉後，即可在這裡管理筆記與查看逐筆盈虧。</div>
+  }
+</section>

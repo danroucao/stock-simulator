@@ -1,0 +1,10 @@
+{
+  "/api/tpex": {
+    "target": "https://www.tpex.org.tw",
+    "secure": true,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/api/tpex": ""
+    }
+  }
+}

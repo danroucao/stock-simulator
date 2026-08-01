@@ -1,0 +1,537 @@
+﻿<main class="dashboard">
+  <section class="hero-card">
+    <div class="hero-copy">
+      <span class="eyebrow">股票下單模擬器</span>
+      <h1>{{ title() }}</h1>
+      <p>
+        輸入目標股票、明日漲停與跌停價後，即可在介面內選定下單價格與方式，並立即預估短線與長線獲利。
+      </p>
+    </div>
+    <div class="summary-grid">
+      <div class="summary-item accent">
+        <span>目標股票</span>
+        <strong>{{ stockSymbol() }} · {{ stockName() }}</strong>
+      </div>
+      <div class="summary-item">
+        <span>最新市價</span>
+        <strong>{{ latestPrice() | number: '1.0-0' }}</strong>
+      </div>
+      <div class="summary-item">
+        <span>資料日期</span>
+        <strong>{{ quoteDate() || requestedDate() }}</strong>
+      </div>
+      <div class="summary-item">
+        <span>長線 ROI</span>
+        <strong>{{ longTermRoi() | number: '1.2-2' }}%</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="stock-record-panel" aria-labelledby="stock-record-title">
+    <div class="stock-record-heading">
+      <div><span class="eyebrow">多檔股票</span><h2 id="stock-record-title">股票記錄</h2></div>
+      <div class="stock-record-add"><input type="text" inputmode="numeric" placeholder="輸入股票代號，例如 2317" [value]="recordSymbolInput()" (input)="recordSymbolInput.set($any($event.target).value)" (keydown.enter)="addStockRecord()" /><button type="button" (click)="addStockRecord()">＋ 新增股票</button></div>
+    </div>
+    @if (recordQuoteLoading()) {
+      <p class="record-status" role="status">正在取得 {{ recordQuoteLoading() }} 的上市／上櫃股價…</p>
+    }
+    @if (recordQuoteError()) {
+      <p class="record-status error" role="alert">{{ recordQuoteError() }}</p>
+    }
+    <div class="stock-record-list">
+      @for (record of stockRecords(); track record.symbol) {
+        <div class="stock-record-card" [class.active]="stockSymbol() === record.symbol" role="button" tabindex="0" (click)="selectStockRecord(record)" (keydown.enter)="selectStockRecord(record)">
+          <div><strong>{{ record.symbol }}</strong><span>{{ record.name }}</span></div>
+          <div class="record-price"><strong>{{ record.latestPrice | number:'1.0-2' }}</strong><span [class.positive]="record.change >= 0" [class.negative]="record.change < 0">{{ record.change >= 0 ? '+' : '' }}{{ record.change | number:'1.0-2' }}</span></div>
+          <button type="button" class="record-remove" (click)="removeStockRecord(record.symbol, $event)" [attr.aria-label]="'移除 ' + record.symbol">×</button>
+        </div>
+      } @empty {
+        <p class="record-empty">輸入股票代號，建立第一筆股票記錄。</p>
+      }
+    </div>
+  </section>
+
+  <section class="portfolio-dashboard" aria-labelledby="portfolio-dashboard-title">
+    <div class="portfolio-dashboard-heading"><div><span class="eyebrow">投資組合</span><h2 id="portfolio-dashboard-title">資產與風險總覽</h2></div><span>預設單成交後即時試算</span></div>
+    <div class="portfolio-metrics">
+      <div><span>持倉成本</span><strong>{{ portfolioCost() | number:'1.0-0' }}</strong></div>
+      <div><span>目前市值</span><strong>{{ portfolioMarketValue() | number:'1.0-0' }}</strong></div>
+      <div><span>未實現損益</span><strong [class.positive]="portfolioUnrealizedProfit() >= 0" [class.negative]="portfolioUnrealizedProfit() < 0">{{ portfolioUnrealizedProfit() | number:'1.0-0' }}</strong></div>
+      <div><span>已實現損益</span><strong [class.positive]="portfolioRealizedProfit() >= 0" [class.negative]="portfolioRealizedProfit() < 0">{{ portfolioRealizedProfit() | number:'1.0-0' }}</strong></div>
+      <div><span>預設單需求</span><strong>{{ pendingOrderCapital() | number:'1.0-0' }}</strong></div>
+      <div><span>成交後剩餘現金</span><strong [class.negative]="cashAfterPendingOrders() < 0">{{ cashAfterPendingOrders() | number:'1.0-0' }}</strong></div>
+    </div>
+    <div class="portfolio-controls">
+      <label class="field"><span>可用現金</span><input type="number" min="0" [value]="availableCash()" (input)="availableCash.set(+($any($event.target).value || 0))" /></label>
+      <label class="field"><span>每筆最大可承受虧損</span><input type="number" min="1" [value]="maxRiskPerTrade()" (input)="maxRiskPerTrade.set(+($any($event.target).value || 1))" /></label>
+      <label class="field"><span>單一股票比重上限</span><input type="number" min="1" max="100" [value]="maxStockWeight()" (input)="maxStockWeight.set(+($any($event.target).value || 1))" /></label>
+      <label class="field"><span>手續費折數</span><input type="number" min="0" max="1" step="0.1" [value]="feeDiscount()" (input)="feeDiscount.set(+($any($event.target).value || 0))" /></label>
+    </div>
+    <div class="concentration-list">
+      @for (item of portfolioConcentration(); track item.symbol) {
+        <div [class.warning]="item.weight > maxStockWeight()"><span>{{ item.symbol }}</span><div><i [style.width.%]="item.weight"></i></div><strong>{{ item.weight | number:'1.1-1' }}%</strong></div>
+      }
+    </div>
+    @if (cashAfterPendingOrders() < 0) { <p class="portfolio-warning">預設單全部成交將超過可用現金 {{ -cashAfterPendingOrders() | number:'1.0-0' }} 元。</p> }
+  </section>
+
+  <section class="simulator-grid">
+    <article class="panel chart-panel" [class.collapsed]="collapsedPanels().has('chart')">
+      <div class="panel-header">
+        <h2>歷史股價圖表</h2>
+        <div class="chart-toolbar">
+          <label class="field compact chart-date-field">
+            <span>查詢日期</span>
+            <input type="date" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
+          </label>
+          <div class="chart-range">
+            @for (item of chartRangeOptions; track item) {
+              <button type="button" class="chart-range-button" [class.active]="chartDays() === item" (click)="onChartRangeChange(item)">
+                {{ item }} 日
+              </button>
+            }
+          </div>
+          <button type="button" class="collapse-button" (click)="togglePanel('chart')" [attr.aria-expanded]="!collapsedPanels().has('chart')" aria-label="收合歷史股價圖表">⌃</button>
+        </div>
+      </div>
+
+      <div class="chart-wrap">
+        @if (tooltip()) {
+          <div class="chart-tooltip" [style.left.px]="tooltip()?.x" [style.top.px]="tooltip()?.y">
+            <div class="tooltip-head">{{ tooltip()?.date }}</div>
+            <div>開：{{ tooltip()?.open | number: '1.0-0' }}</div>
+            <div>高：{{ tooltip()?.high | number: '1.0-0' }}</div>
+            <div>低：{{ tooltip()?.low | number: '1.0-0' }}</div>
+            <div>收：{{ tooltip()?.close | number: '1.0-0' }}</div>
+            <div>漲跌：{{ tooltip()?.change | number: '1.0-2' }}</div>
+            <div>成交量：{{ tooltip()?.volume | number: '1.0-0' }}</div>
+          </div>
+        }
+
+        <div class="chart-section-label"><span>價格走勢</span><em>OHLC · {{ chartDays() }} 日</em></div>
+        <svg viewBox="0 0 760 310" class="stock-chart" preserveAspectRatio="xMidYMid meet" aria-label="歷史股價圖表">
+          @for (tick of chartPriceTicks(); track tick.y) {
+            <line x1="18" [attr.y1]="tick.y" x2="742" [attr.y2]="tick.y" class="chart-grid-line"></line>
+            <text x="704" [attr.y]="tick.y - 5" class="chart-axis-label">{{ tick.value | number:'1.0-0' }}</text>
+          }
+          <path [attr.d]="areaPath()" class="chart-area"></path>
+          @for (bar of candleBars(); track bar.date) {
+            <line [attr.x1]="bar.x + bar.width / 2" [attr.x2]="bar.x + bar.width / 2" [attr.y1]="bar.highY" [attr.y2]="bar.lowY" [attr.stroke]="bar.fill" stroke-width="2"></line>
+            <rect
+              [attr.x]="bar.x"
+              [attr.y]="bar.y"
+              [attr.width]="bar.width"
+              [attr.height]="bar.height"
+              [attr.fill]="bar.fill"
+              (mouseenter)="onBarHoverByDate(bar.date, $event)"
+              (mousemove)="onBarHoverByDate(bar.date, $event)"
+              (mouseleave)="onBarLeave()"
+            ></rect>
+          }
+          <path [attr.d]="chartPath()" class="chart-line"></path>
+          @for (tick of chartDateTicks(); track tick.label) {
+            <text [attr.x]="tick.x" y="305" class="chart-date-label" [attr.text-anchor]="tick.x < 100 ? 'start' : tick.x > 650 ? 'end' : 'middle'">{{ tick.label }}</text>
+          }
+        </svg>
+        <div class="chart-section-label volume-label"><span>成交量</span><em>Volume</em></div>
+        <svg viewBox="0 0 760 140" class="volume-chart" preserveAspectRatio="xMidYMid meet" aria-label="成交量圖表">
+          <line x1="14" y1="132" x2="746" y2="132" class="chart-grid-line"></line>
+          @for (bar of volumeBars(); track bar.date) {
+            <rect
+              [attr.x]="bar.x"
+              [attr.y]="bar.y"
+              [attr.width]="bar.width"
+              [attr.height]="bar.height"
+              rx="3"
+              [attr.fill]="bar.fill"
+              (mouseenter)="onBarHoverByDate(bar.date, $event)"
+              (mousemove)="onBarHoverByDate(bar.date, $event)"
+              (mouseleave)="onBarLeave()"
+            ></rect>
+          }
+        </svg>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-pill">
+          <span>開盤</span>
+          <strong>{{ latestSession()?.open | number: '1.0-0' }}</strong>
+        </div>
+        <div class="stat-pill">
+          <span>最高</span>
+          <strong>{{ latestSession()?.high | number: '1.0-0' }}</strong>
+        </div>
+        <div class="stat-pill">
+          <span>最低</span>
+          <strong>{{ latestSession()?.low | number: '1.0-0' }}</strong>
+        </div>
+        <div class="stat-pill">
+          <span>當日漲跌幅</span>
+          <strong>{{ quoteChange() | number: '1.0-2' }}</strong>
+        </div>
+        <div class="stat-pill">
+          <span>成交金額</span>
+          <strong>{{ turnover() | number: '1.0-0' }}</strong>
+        </div>
+        <div class="stat-pill">
+          <span>成交量</span>
+          <strong>{{ latestSession()?.volume | number: '1.0-0' }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel board-panel" [class.collapsed]="collapsedPanels().has('board')">
+      <div class="panel-header">
+        <div><span class="section-eyebrow">短線模擬 × 座標下單</span><h2>近期策略下單板</h2></div>
+        <div class="panel-header-actions"><span class="badge">{{ stockSymbol() }} · {{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><button type="button" class="save-workspace-button" (click)="saveWorkspace()">儲存資料</button><button type="button" class="collapse-button" (click)="togglePanel('board')" [attr.aria-expanded]="!collapsedPanels().has('board')" aria-label="收合近期策略下單板">⌃</button></div>
+      </div>
+      @if (saveStatus()) { <p class="save-status" role="status">{{ saveStatus() }}</p> }
+
+      <div class="board-layout">
+        <div class="board-visual">
+          @if (boardTooltip(); as boardTooltipState) {
+            <div class="board-tooltip" [style.left.px]="boardTooltipState.x" [style.top.px]="boardTooltipState.y">
+              <div class="tooltip-head">{{ boardTooltipState.position.symbol }} · {{ boardTooltipState.position.type }}</div>
+              <div>交易時間：{{ boardTooltipState.position.tradeDate || '今天' }}</div>
+              <div>買入價：{{ boardTooltipState.position.entryPrice | number: '1.0-0' }}</div>
+              <div>股數：{{ boardTooltipState.position.shares | number: '1.0-0' }}</div>
+            </div>
+          }
+
+          <svg
+            viewBox="0 0 760 310"
+            class="board-svg"
+            preserveAspectRatio="xMidYMid meet"
+            aria-label="下單座標圖"
+            (pointermove)="onBoardPointerMove($event)"
+            (pointerup)="onBoardPointerUp()"
+            (pointerleave)="onBoardPointerUp()"
+          >
+            <line x1="55" y1="40" x2="55" y2="250" stroke="rgba(146, 176, 222, 0.55)"></line>
+            <line x1="55" y1="250" x2="735" y2="250" stroke="rgba(146, 176, 222, 0.55)"></line>
+            <line x1="55" y1="40" x2="735" y2="40" stroke="rgba(146, 176, 222, 0.18)" stroke-dasharray="4 5"></line>
+            <line x1="55" y1="145" x2="735" y2="145" stroke="rgba(146, 176, 222, 0.18)" stroke-dasharray="4 5"></line>
+            <line x1="250" y1="40" x2="250" y2="250" stroke="rgba(101, 214, 255, 0.28)" stroke-dasharray="5 5"></line>
+            <rect x="55" y="40" width="195" height="210" fill="rgba(82, 111, 154, .06)"></rect>
+            <text x="8" y="44" fill="#b5c8e7" font-size="10">{{ boardAxis().maxPrice | number:'1.0-0' }}</text>
+            <text x="8" y="149" fill="#879bbc" font-size="10">價格</text>
+            <text x="8" y="254" fill="#b5c8e7" font-size="10">{{ boardAxis().minPrice | number:'1.0-0' }}</text>
+            <text x="115" y="270" fill="#8fa7ca" font-size="10">既有持倉（不按時間）</text>
+            <text x="280" y="270" fill="#91a7c9" font-size="10">今天 {{ boardAxis().startLabel }}</text>
+            <text x="690" y="270" fill="#91a7c9" font-size="10">{{ boardAxis().endLabel }}</text>
+            <text x="475" y="294" fill="#879bbc" font-size="10">近期預設單時間軸</text>
+            @for (marker of boardMarkers(); track marker.id) {
+              <g (dblclick)="editTradePosition(marker.position)">
+                <circle
+                  [attr.cx]="marker.x"
+                  [attr.cy]="marker.y"
+                  r="11"
+                  [attr.fill]="marker.fill"
+                  (pointerdown)="onBoardMarkerPointerDown(marker.id, $event)"
+                  (mouseenter)="onBoardMarkerHover(marker.position, $event)"
+                  (mousemove)="onBoardMarkerHover(marker.position, $event)"
+                  (mouseleave)="onBoardMarkerLeave()"
+                ></circle>
+                <text [attr.x]="marker.x + 12" [attr.y]="marker.y - 8" fill="#f2f7ff" font-size="11">{{ marker.label }}</text>
+                <text [attr.x]="marker.x + 12" [attr.y]="marker.y + 6" fill="#8ba1c3" font-size="9">{{ marker.dateLabel }}</text>
+              </g>
+            }
+            @for (marker of presetMarkers(); track marker.id) {
+              <g class="preset-marker">
+                <rect [attr.x]="marker.x - 9" [attr.y]="marker.y - 9" width="18" height="18" rx="3" fill="#65d6ff" stroke="#dff7ff" stroke-width="2" stroke-dasharray="3 2" [attr.transform]="'rotate(45 ' + marker.x + ' ' + marker.y + ')'" />
+                <text [attr.x]="marker.x + 14" [attr.y]="marker.y + 17" fill="#91defe" font-size="10">{{ marker.label }}</text>
+                <text [attr.x]="marker.x + 14" [attr.y]="marker.y + 29" fill="#7798bb" font-size="9">到期 {{ marker.dateLabel }}</text>
+              </g>
+            }
+          </svg>
+          <div class="board-legend"><span><i class="legend-dot long"></i>做多／融資</span><span><i class="legend-dot short"></i>做空／融券</span><span><i class="legend-diamond"></i>近期預設單</span><em>既有持倉不按時間定位；預設單依到期日顯示</em></div>
+        </div>
+
+        <div class="board-form">
+          <div class="order-mode-switch" role="group" aria-label="下單模式">
+            <button type="button" [class.active]="orderEntryMode() === 'holding'" (click)="orderEntryMode.set('holding')">新增已入倉</button>
+            <button type="button" [class.active]="orderEntryMode() === 'preset'" (click)="orderEntryMode.set('preset')">建立近期預設單</button>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>股票代號</span>
+              <input type="text" [value]="positionForm().symbol" (input)="onPositionFieldChange('symbol', $any($event.target).value)" />
+            </label>
+            @if (orderEntryMode() === 'holding') {
+              <label class="field"><span>入倉日期</span><input type="date" [value]="positionForm().tradeDate" (change)="onPositionFieldChange('tradeDate', $any($event.target).value)" /></label>
+            }
+            <label class="field">
+              <span>持倉方向</span>
+              <select [value]="positionForm().type" (change)="onPositionFieldChange('type', $any($event.target).value)">
+                @for (item of orderOptions; track item.value) {
+                  <option [value]="item.value">{{ item.label }}</option>
+                }
+              </select>
+            </label>
+            <label class="field">
+              <span>下單單位</span>
+              <select [value]="shareUnit()" (change)="onShareUnitChange($any($event.target).value)">
+                <option value="boardLot">整張（1000 股為單位）</option>
+                <option value="oddLot">零股</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>股數</span>
+              <input type="number" [value]="positionForm().shares" [min]="shareUnit() === 'boardLot' ? 1000 : 1" [max]="shareUnit() === 'oddLot' ? 999 : null" [step]="shareUnit() === 'boardLot' ? 1000 : 1" (input)="onPositionFieldChange('shares', +($any($event.target).value || 1))" />
+            </label>
+            <label class="field">
+              <span>買入價</span>
+              <input type="number" [value]="positionForm().entryPrice" min="1" (input)="onPositionFieldChange('entryPrice', +($any($event.target).value || 1))" />
+            </label>
+            <label class="field"><span>停損價</span><input type="number" [value]="positionForm().stopLossPrice || limitDownPrice()" min="0.01" (input)="onPositionFieldChange('stopLossPrice', +($any($event.target).value || 0.01))" /></label>
+            @if (orderEntryMode() === 'preset') {
+              <label class="field"><span>預測出場價</span><input type="number" [value]="positionForm().targetPrice" min="1" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 1))" /></label>
+              <label class="field"><span>預設單有效日</span><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /><small>可選今日起 5 個交易日，不含週六、日</small></label>
+            }
+            <label class="field">
+              <span>備註</span>
+              <input type="text" [value]="positionForm().note" (input)="onPositionFieldChange('note', $any($event.target).value)" />
+            </label>
+          </div>
+          @if (orderEntryMode() === 'preset') {
+            <div class="order-risk-card">
+              <div><span>本單預估風險</span><strong class="negative">{{ proposedOrderRisk() | number:'1.0-0' }}</strong></div>
+              <div><span>目標預估報酬</span><strong class="positive">{{ proposedOrderReward() | number:'1.0-0' }}</strong></div>
+              <div><span>風險報酬比</span><strong>{{ proposedRiskRewardRatio() | number:'1.2-2' }}</strong></div>
+              <div><span>依風險上限建議</span><strong>{{ suggestedRiskShares() | number:'1.0-0' }} 股</strong></div>
+              <button type="button" class="ghost-button" (click)="applySuggestedShares()">套用建議股數</button>
+            </div>
+          }
+          @if (orderEntryMode() === 'holding') {
+            <button type="button" class="action-button" (click)="addTradePosition()">{{ editingPositionId() ? '儲存持倉修改' : '新增已入倉股票' }}</button>
+          } @else {
+            <button type="button" class="preset-button form-submit" (click)="createPresetOrderFromForm()">＋ 建立近期預設單</button>
+          }
+        </div>
+      </div>
+
+      @if (currentStockPresetOrders().length) {
+        <section class="preset-order-list" aria-label="近期預設單">
+          <div class="preset-list-title"><h3>近期預設單</h3><span>虛線菱形已同步顯示於座標圖</span></div>
+          @for (order of currentStockPresetOrders(); track order.id) {
+            <div class="preset-order-row">
+              <span class="preset-status">待觸發</span><strong>{{ order.symbol }} · {{ order.type }}</strong><span>進場 {{ order.entryPrice | number:'1.0-2' }}</span><span>停利 {{ order.exitPrice | number:'1.0-2' }}</span><span>{{ order.shareUnit === 'oddLot' ? '零股' : '整張' }} · {{ order.shares | number:'1.0-0' }} 股</span><span>有效至 {{ order.expiryDate || order.validDays + ' 天' }}</span><strong class="positive">+{{ presetProfit(order) | number:'1.0-0' }}</strong><button type="button" class="ghost-button" (click)="removePresetOrder(order.id)">取消</button>
+            </div>
+          }
+        </section>
+      }
+
+      <section class="stock-stress-panel" [class.collapsed]="collapsedPanels().has('stress')" aria-labelledby="stress-title">
+        <div class="panel-header"><div><span class="section-eyebrow">隔日個股風險</span><h3 id="stress-title">{{ stockSymbol() }} 持倉／預設單壓力測試</h3></div><div class="panel-header-actions"><span class="badge">{{ stressScenarios().length }} 種情境</span><button type="button" class="collapse-button" (click)="togglePanel('stress')" [attr.aria-expanded]="!collapsedPanels().has('stress')">⌃</button></div></div>
+        <div class="stress-summary"><span>計算基準 <strong>{{ valuationPrice() | number:'1.0-2' }}</strong></span><span>{{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><span>預設單假設已於進場價成交</span></div>
+        <div class="stress-table-wrap"><table class="stress-table stock-stress-table">
+          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>預設單損益</th><th>合計損益</th><th>總曝險</th><th>狀態</th></tr></thead>
+          <tbody>@for (scenario of stressScenarios(); track scenario.id) {
+            <tr [class.warning]="scenario.severity === 'warning'" [class.critical]="scenario.severity === 'critical'">
+              <td><strong>{{ scenario.name }}</strong><small>{{ scenario.assumption }}</small></td><td>{{ scenario.scenarioPrice | number:'1.0-2' }}</td>
+              <td [class.positive]="scenario.holdingProfit >= 0" [class.negative]="scenario.holdingProfit < 0">{{ scenario.holdingProfit | number:'1.0-0' }}</td>
+              <td [class.positive]="scenario.presetProfit >= 0" [class.negative]="scenario.presetProfit < 0">{{ scenario.presetProfit | number:'1.0-0' }}</td>
+              <td [class.positive]="scenario.totalProfit >= 0" [class.negative]="scenario.totalProfit < 0"><strong>{{ scenario.totalProfit | number:'1.0-0' }}</strong></td>
+              <td>{{ scenario.stressedExposure | number:'1.0-0' }}</td><td><span class="stress-status">{{ scenario.severity === 'critical' ? '高風險' : scenario.severity === 'warning' ? '注意' : '可承受' }}</span></td>
+            </tr>
+          }</tbody>
+        </table></div>
+        <p class="backtest-note">僅對目前選取個股進行隔日情境試算；跳空情境不假設能在中間價位停損。</p>
+      </section>
+
+      <div class="holding-center-toolbar">
+        <div><span class="section-eyebrow">統一持倉管理</span><h3>持倉記錄與實際盈虧</h3><p>{{ tradePositions().length }} 筆持倉 · {{ positionProfitSummary().length }} 檔股票</p></div>
+        <div class="holding-view-switch" role="group" aria-label="持倉顯示範圍"><button type="button" [class.active]="holdingViewMode() === 'current'" (click)="holdingViewMode.set('current')">目前股票</button><button type="button" [class.active]="holdingViewMode() === 'all'" (click)="holdingViewMode.set('all')">全部持倉</button></div>
+      </div>
+      <section class="future-layout" [class.collapsed]="collapsedPanels().has('future')">
+        <div class="future-layout-heading"><div><span class="section-eyebrow">目前個股</span><h3>{{ stockSymbol() }} 未來布局</h3></div><button type="button" class="collapse-button" (click)="togglePanel('future')" [attr.aria-expanded]="!collapsedPanels().has('future')">⌃</button></div>
+        <div class="future-layout-content">
+          <div class="field-grid">
+            <label class="field"><span>預期目標價</span><input type="number" [value]="longTermTarget()" min="1" (input)="longTermTarget.set(+($any($event.target).value || 1))" /></label>
+            <label class="field"><span>預計持有天數</span><input type="number" [value]="holdingDays()" min="1" (input)="holdingDays.set(+($any($event.target).value || 1))" /></label>
+            <label class="field"><span>融資成本（年）</span><input type="number" [value]="financingRate()" min="0" step="0.1" (input)="financingRate.set(+($any($event.target).value || 0))" /></label>
+            <label class="field"><span>融券成本（年）</span><input type="number" [value]="shortBorrowRate()" min="0" step="0.1" (input)="shortBorrowRate.set(+($any($event.target).value || 0))" /></label>
+          </div>
+          <div class="future-layout-results"><div><span>整合持倉</span><strong>{{ currentStockPositions().length }} 筆 · {{ currentStockHoldingShares() | number:'1.0-0' }} 股</strong></div><div><span>目前損益</span><strong [class.positive]="currentStockMarketProfit() >= 0" [class.negative]="currentStockMarketProfit() < 0">{{ currentStockMarketProfit() | number:'1.0-0' }}</strong></div><div><span>目標價預期淨利</span><strong>{{ longTermProfit() | number:'1.0-0' }}</strong></div><div><span>預期 ROI</span><strong>{{ longTermRoi() | number:'1.2-2' }}%</strong></div><button type="button" class="preset-button" [disabled]="!currentStockPositions().length" (click)="applyLongTermTargetToPositions()">套用到本股全部持倉</button></div>
+        </div>
+      </section>
+      <app-position-details
+        [positions]="visibleHoldingPositions()"
+        [currentSymbol]="stockSymbol()"
+        [latestPrice]="latestPrice()"
+        [fallbackPrice]="valuationPrice()"
+        [pricesBySymbol]="latestPrices()"
+        [feeDiscount]="feeDiscount()"
+        (positionChange)="onPositionInlineChange($event)"
+        (positionClose)="closeTradePosition($event)"
+      />
+      @if (closedTrades().length) {
+        <section class="closed-trade-list"><h3>已實現交易</h3>
+          @for (trade of closedTrades(); track trade.id) { <div><strong>{{ trade.symbol }}</strong><span>{{ trade.shares | number:'1.0-0' }} 股</span><span>{{ trade.entryPrice | number:'1.0-2' }} → {{ trade.exitPrice | number:'1.0-2' }}</span><span>{{ trade.exitDate }}</span><strong [class.positive]="trade.realizedProfit >= 0" [class.negative]="trade.realizedProfit < 0">{{ trade.realizedProfit | number:'1.0-0' }}</strong></div> }
+        </section>
+      }
+    </article>
+
+    @if (false) { <article class="panel" [class.collapsed]="collapsedPanels().has('short')">
+      <div class="panel-header">
+        <h2>短線模擬</h2>
+        <div class="panel-header-actions"><span class="badge">{{ dayBias() }}</span><button type="button" class="collapse-button" (click)="togglePanel('short')" [attr.aria-expanded]="!collapsedPanels().has('short')" aria-label="收合短線模擬">⌃</button></div>
+      </div>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>目標股票</span>
+          <input type="text" [value]="stockSymbol()" readonly />
+        </label>
+
+        <label class="field"><span>目前市價</span><input type="number" [value]="valuationPrice()" readonly /></label>
+
+        <label class="field">
+          <span>明日漲停價</span>
+          <input type="number" [value]="limitUpPrice()" (input)="onLimitUpChange(+($any($event.target).value || 0))" />
+        </label>
+
+        <label class="field">
+          <span>明日跌停價</span>
+          <input type="number" [value]="limitDownPrice()" (input)="onLimitDownChange(+($any($event.target).value || 0))" />
+        </label>
+
+        <label class="field">
+          <span>下單單位</span>
+          <select [value]="simulationShareUnit()" (change)="onSimulationShareUnitChange($any($event.target).value)"><option value="boardLot">整張</option><option value="oddLot">零股</option></select>
+        </label>
+
+        <label class="field"><span>下單股數</span><input type="number" [value]="shares()" [min]="simulationShareUnit() === 'boardLot' ? 1000 : 1" [max]="simulationShareUnit() === 'oddLot' ? 999 : null" [step]="simulationShareUnit() === 'boardLot' ? 1000 : 1" (input)="shares.set(+($any($event.target).value || 1))" /></label>
+
+        <label class="field"><span>預設單有效日</span><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
+      </div>
+
+      <div class="action-row">
+        <button type="button" class="action-button" (click)="loadCurrentPrice()">
+          {{ isLoadingQuote() ? '更新中…' : '更新真實股價' }}
+        </button>
+        <span class="quote-status">
+          {{ quoteDate() ? '資料日期：' + quoteDate() : '尚未取得實時資料' }}
+        </span>
+      </div>
+
+      @if (quoteError()) {
+        <p class="error-text">{{ quoteError() }}</p>
+      }
+
+      <div class="price-window">
+        <div class="range-labels">
+          <span>跌停 {{ minPrice() | number: '1.0-0' }}</span>
+          <span>漲停 {{ maxPrice() | number: '1.0-0' }}</span>
+        </div>
+        <div class="range-track">
+          <div class="range-fill" [style.width.%]="selectedPricePercent()"></div>
+          <div class="range-marker" [style.left.%]="selectedPricePercent()"></div>
+        </div>
+        <input
+          class="range-input"
+          type="range"
+          [min]="minPrice()"
+          [max]="maxPrice()"
+          [value]="selectedPrice()"
+          (input)="onPriceChange(+($any($event.target).value || minPrice()))"
+        />
+      </div>
+
+      <div class="price-row">
+        <label class="field compact">
+          <span>欲下單價格</span>
+          <input type="number" [value]="selectedPrice()" (input)="onPriceChange(+($any($event.target).value || minPrice()))" />
+        </label>
+        <div class="price-pill">
+          <span>當前選擇</span>
+          <strong>{{ selectedPrice() | number: '1.0-0' }}</strong>
+        </div>
+      </div>
+
+      <div class="order-options">
+        @for (item of orderOptions; track item.value) {
+          <label class="order-card" [class.active]="orderType() === item.value">
+            <input type="radio" name="orderType" [value]="item.value" [checked]="orderType() === item.value" (change)="orderType.set(item.value)" />
+            <div>
+              <strong>{{ item.label }}</strong>
+              <span>{{ item.detail }}</span>
+            </div>
+          </label>
+        }
+      </div>
+
+      <div class="result-box">
+        <div>
+          <span>短線預估獲利（漲停）</span>
+          <strong class="positive">{{ shortTermProfitRange().bull | number: '1.0-0' }}</strong>
+        </div>
+        <div>
+          <span>短線預估獲利（跌停）</span>
+          <strong class="negative">{{ shortTermProfitRange().bear | number: '1.0-0' }}</strong>
+        </div>
+        <p>{{ positionSummary() }}</p>
+        <button type="button" class="preset-button result-preset" (click)="createPresetOrder()">將此模擬加入近期預設單</button>
+      </div>
+    </article> }
+
+    @if (false) { <article class="panel" [class.collapsed]="collapsedPanels().has('long')">
+      <div class="panel-header">
+        <h2>長線布局</h2>
+        <div class="panel-header-actions"><span class="badge">預期目標價</span><button type="button" class="collapse-button" (click)="togglePanel('long')" [attr.aria-expanded]="!collapsedPanels().has('long')" aria-label="收合長線布局">⌃</button></div>
+      </div>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>預期目標價格</span>
+          <input type="number" [value]="longTermTarget()" min="1" (input)="longTermTarget.set(+($any($event.target).value || 1))" />
+        </label>
+
+        <label class="field">
+          <span>持有天數</span>
+          <input type="number" [value]="holdingDays()" min="1" (input)="holdingDays.set(+($any($event.target).value || 1))" />
+        </label>
+
+        <label class="field">
+          <span>融資成本（年）</span>
+          <input type="number" [value]="financingRate()" min="0" step="0.1" (input)="financingRate.set(+($any($event.target).value || 0))" />
+        </label>
+
+        <label class="field">
+          <span>融券成本（年）</span>
+          <input type="number" [value]="shortBorrowRate()" min="0" step="0.1" (input)="shortBorrowRate.set(+($any($event.target).value || 0))" />
+        </label>
+      </div>
+
+      <div class="result-box highlighted">
+        <div><span>整合持倉</span><strong>{{ currentStockPositions().length }} 筆 · {{ currentStockHoldingShares() | number:'1.0-0' }} 股</strong></div>
+        <div><span>目前實際盈虧</span><strong [class.positive]="currentStockMarketProfit() >= 0" [class.negative]="currentStockMarketProfit() < 0">{{ currentStockMarketProfit() | number:'1.0-0' }}</strong></div>
+        <div>
+          <span>全部持倉到目標價預期淨利</span>
+          <strong>{{ longTermProfit() | number: '1.0-0' }}</strong>
+        </div>
+        <div>
+          <span>投資報酬率</span>
+          <strong>{{ longTermRoi() | number: '1.2-2' }}%</strong>
+        </div>
+        <p>{{ orderTypeHint() }}</p>
+        <button type="button" class="preset-button result-preset" [disabled]="!currentStockPositions().length" (click)="applyLongTermTargetToPositions()">套用目標價到 {{ stockSymbol() }} 全部持倉</button>
+      </div>
+    </article> }
+
+    <article class="panel backtest-panel" [class.collapsed]="collapsedPanels().has('backtest')">
+      <div class="panel-header"><div><span class="section-eyebrow">歷史驗證</span><h2>策略回測與回撤</h2></div><div class="panel-header-actions"><span class="badge">{{ chartDays() }} 日</span><button type="button" class="collapse-button" (click)="togglePanel('backtest')">⌃</button></div></div>
+      @if (backtestResult().observations > 1) {
+        <div class="backtest-grid">
+          <div><span>樣本數</span><strong>{{ backtestResult().observations }}</strong></div>
+          <div><span>區間報酬</span><strong [class.positive]="backtestResult().totalReturn >= 0" [class.negative]="backtestResult().totalReturn < 0">{{ backtestResult().totalReturn | number:'1.2-2' }}%</strong></div>
+          <div><span>最大回撤</span><strong class="negative">{{ backtestResult().maxDrawdown | number:'1.2-2' }}%</strong></div>
+          <div><span>上漲日勝率</span><strong>{{ backtestResult().winRate | number:'1.1-1' }}%</strong></div>
+          <div><span>Profit Factor</span><strong>{{ backtestResult().profitFactor | number:'1.2-2' }}</strong></div>
+          <div><span>模擬期末權益</span><strong>{{ backtestResult().endingEquity | number:'1.0-0' }}</strong></div>
+        </div>
+        <p class="backtest-note">依下單板目前選擇的 {{ positionForm().type }} 方向，使用圖表區間收盤價模擬。結果僅用於風險比較，不代表未來報酬。</p>
+      } @else { <p class="record-empty">歷史資料不足，無法執行回測。</p> }
+    </article>
+  </section>
+</main>
