@@ -1,6 +1,6 @@
 ﻿import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, catchError, forkJoin, map, of, shareReplay, switchMap } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
 
 interface TwseStockResponse {
   data?: [string, string, string, string, string, string, string, string, string, string][];
@@ -8,23 +8,24 @@ interface TwseStockResponse {
   title?: string;
 }
 
-interface TpexDailyQuote {
-  Date: string;
-  SecuritiesCompanyCode: string;
-  CompanyName: string;
-  Close: string;
-  Change: string;
-  Open: string;
-  High: string;
-  Low: string;
-  TradingShares: string;
-  TransactionAmount: string;
-}
-
 interface TpexHistoryResponse {
   stat?: string;
   name?: string;
   tables?: Array<{ data?: string[][] }>;
+}
+
+interface MisQuoteResponse {
+  msgArray?: Array<{
+    c?: string;
+    n?: string;
+    d?: string;
+    z?: string;
+    o?: string;
+    h?: string;
+    l?: string;
+    y?: string;
+    v?: string;
+  }>;
 }
 
 export interface StockQuote {
@@ -45,9 +46,6 @@ export interface StockHistoryPoint extends StockQuote {}
 export class StockPriceService {
   private readonly requestUrl = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY';
   private readonly tpexProxyUrl = this.getTpexProxyUrl();
-  private readonly tpexQuotesUrl = `${this.tpexProxyUrl}/openapi/v1/tpex_mainboard_daily_close_quotes`;
-  private tpexQuotesCache?: Observable<TpexDailyQuote[]>;
-
   constructor(private readonly http: HttpClient) {}
 
   getLatestQuote(symbol: string, requestDate?: string): Observable<StockQuote | null> {
@@ -128,28 +126,22 @@ export class StockPriceService {
   }
 
   private getTpexLatestQuote(symbol: string): Observable<StockQuote | null> {
-    const quotes = this.tpexQuotesCache ??= this.http.get<TpexDailyQuote[]>(this.tpexQuotesUrl).pipe(
-      shareReplay({ bufferSize: 1, refCount: false }),
-    );
-    return quotes.pipe(
-      map((rows) => {
-        if (!Array.isArray(rows)) return null;
-        const row = rows.find((item) => item.SecuritiesCompanyCode === symbol);
+    return this.http.get<MisQuoteResponse>(`${this.tpexProxyUrl}/api/quote?symbol=${symbol}`).pipe(
+      map((response) => {
+        const row = response.msgArray?.find((item) => item.c === symbol);
         if (!row) return null;
-        const rawDate = row.Date.replace(/\D/g, '');
-        const rocYear = rawDate.slice(0, -4);
-        const month = rawDate.slice(-4, -2);
-        const day = rawDate.slice(-2);
+        const previousClose = this.toNumber(row.y ?? '0');
+        const close = this.toNumber(row.z ?? row.y ?? '0');
         return {
-          date: `${rocYear}/${month}/${day}`,
-          name: row.CompanyName.trim(),
-          open: this.toNumber(row.Open),
-          high: this.toNumber(row.High),
-          low: this.toNumber(row.Low),
-          close: this.toNumber(row.Close),
-          change: this.toNumber(row.Change),
-          turnover: this.toNumber(row.TransactionAmount),
-          volume: this.toNumber(row.TradingShares),
+          date: row.d || '',
+          name: row.n?.trim() || symbol,
+          open: this.toNumber(row.o ?? '0'),
+          high: this.toNumber(row.h ?? '0'),
+          low: this.toNumber(row.l ?? '0'),
+          close,
+          change: close - previousClose,
+          turnover: 0,
+          volume: this.toNumber(row.v ?? '0') * 1000,
         };
       }),
       catchError(() => of(null)),

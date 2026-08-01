@@ -36,14 +36,14 @@ describe('StockPriceService history', () => {
 
   it('falls back to TPEx quotes when a symbol is not listed on TWSE', () => {
     const service = new StockPriceService({
-      get: (url: string) => url.includes('tpex_mainboard')
-        ? of([{ Date:'1150731',SecuritiesCompanyCode:'6182',CompanyName:'合晶',Close:'89.00',Change:'+4.30',Open:'92.90',High:'93.10',Low:'84.00',TradingShares:'27335875',TransactionAmount:'2436625467' }])
+      get: (url: string) => url.includes('/api/quote')
+        ? of({ msgArray: [{ c:'6182',n:'合晶',d:'20260731',z:'89.00',y:'84.70',o:'92.90',h:'93.10',l:'84.00',v:'27336' }] })
         : of({ data: [] }),
     } as any);
     service.getLatestQuote('6182', '2026-08-01').subscribe((quote) => {
       expect(quote?.name).toBe('合晶');
       expect(quote?.close).toBe(89);
-      expect(quote?.date).toBe('115/07/31');
+      expect(quote?.date).toBe('20260731');
     });
   });
 
