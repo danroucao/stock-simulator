@@ -47,20 +47,19 @@ describe('StockPriceService history', () => {
     });
   });
 
-  it('loads and sorts a complete TPEx history range when TWSE has no rows', () => {
+  it('loads and sorts a complete OTC history range when TWSE has no rows', () => {
     const service = new StockPriceService({
-      get: (url: string) => url.includes('afterTrading/tradingStock')
-        ? of({ name: '合晶', tables: [{ data: [
-          ['115/07/31', '27,336', '2,436,625', '92.90', '93.10', '84.00', '89.00', '4.30', '20,196'],
-          ['115/07/30', '22,524', '1,909,209', '84.70', '86.70', '84.70', '84.70', '-9.40', '17,910'],
-        ] }] })
+      get: (url: string) => url.includes('/api/history')
+        ? of({ data: [
+          { date:'2026-07-31',stock_id:'6182',Trading_Volume:27335875,Trading_money:2436625467,open:92.9,max:93.1,min:84,close:89,spread:4.3 },
+          { date:'2026-07-30',stock_id:'6182',Trading_Volume:22523675,Trading_money:1909209346,open:84.7,max:86.7,min:84.7,close:84.7,spread:-9.4 },
+        ] })
         : of({ data: [] }),
     } as any);
 
     service.getHistory('6182', 20, '2026-08-01').subscribe((history) => {
       expect(history.map((point) => point.date)).toEqual(['115/07/30', '115/07/31']);
       expect(history.at(-1)?.close).toBe(89);
-      expect(history.at(-1)?.volume).toBe(27_336_000);
+      expect(history.at(-1)?.volume).toBe(27_335_875);
     });
-  });
-});
+  });});

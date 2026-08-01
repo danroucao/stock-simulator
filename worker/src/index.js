@@ -4,6 +4,7 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 const ALLOWED_PATHS = new Set([
+  '/api/history',
   '/api/quote',
   '/openapi/v1/tpex_mainboard_daily_close_quotes',
   '/www/zh-tw/afterTrading/tradingStock',
@@ -34,6 +35,33 @@ export default {
     if (!ALLOWED_PATHS.has(requestUrl.pathname)) return new Response('Path not allowed', { status: 404 });
 
     try {
+      if (requestUrl.pathname === '/api/history') {
+        const symbol = (requestUrl.searchParams.get('symbol') || '').replace(/\D/g, '');
+        const startDate = requestUrl.searchParams.get('start_date') || '';
+        const endDate = requestUrl.searchParams.get('end_date') || '';
+        if (!/^\d{4,6}$/.test(symbol)) return new Response('Invalid symbol', { status: 400 });
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+          return new Response('Invalid date range', { status: 400 });
+        }
+
+        const historyUrl = new URL('https://api.finmindtrade.com/api/v4/data');
+        historyUrl.searchParams.set('dataset', 'TaiwanStockPrice');
+        historyUrl.searchParams.set('data_id', symbol);
+        historyUrl.searchParams.set('start_date', startDate);
+        historyUrl.searchParams.set('end_date', endDate);
+        const historyResponse = await fetch(historyUrl.toString(), {
+          headers: { Accept: 'application/json' },
+        });
+        const headers = new Headers({
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        if (origin) {
+          for (const [key, value] of Object.entries(corsHeaders(origin))) headers.set(key, value);
+        }
+        return new Response(historyResponse.body, { status: historyResponse.status, headers });
+      }
+
       if (requestUrl.pathname === '/api/quote') {
         const symbol = (requestUrl.searchParams.get('symbol') || '').replace(/\D/g, '');
         if (!/^\d{4,6}$/.test(symbol)) return new Response('Invalid symbol', { status: 400 });

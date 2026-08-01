@@ -1,4 +1,4 @@
-﻿import { HttpClient } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
 
@@ -8,10 +8,18 @@ interface TwseStockResponse {
   title?: string;
 }
 
-interface TpexHistoryResponse {
-  stat?: string;
-  name?: string;
-  tables?: Array<{ data?: string[][] }>;
+interface FinMindHistoryResponse {
+  data?: Array<{
+    date: string;
+    stock_id: string;
+    Trading_Volume: number;
+    Trading_money: number;
+    open: number;
+    max: number;
+    min: number;
+    close: number;
+    spread: number;
+  }>;
 }
 
 interface MisQuoteResponse {
@@ -86,45 +94,37 @@ export class StockPriceService {
   }
 
   private getTpexHistory(symbol: string, days: number, requestDate?: string): Observable<StockHistoryPoint[]> {
-    const dates = this.buildHistoryRequestDates(requestDate, days);
-    const requests = dates.map((date) => {
-      const year = date.slice(0, 4);
-      const month = date.slice(4, 6);
-      return this.http.get<TpexHistoryResponse>(
-        `${this.tpexProxyUrl}/www/zh-tw/afterTrading/tradingStock?code=${symbol}&date=${year}/${month}/01`,
-      ).pipe(catchError(() => of({ tables: [] } as TpexHistoryResponse)));
-    });
+    const rawTarget = requestDate?.trim() ? new Date(`${requestDate}T00:00:00`) : new Date();
+    const target = Number.isNaN(rawTarget.getTime()) ? new Date() : rawTarget;
+    const start = new Date(target);
+    start.setDate(start.getDate() - Math.max(days * 2, 45));
+    const formatDate = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-    return forkJoin(requests).pipe(
-      map((responses) => {
-        const byDate = new Map<string, StockHistoryPoint>();
-        for (const response of responses) {
-          for (const row of response.tables?.[0]?.data ?? []) {
-            if (!Array.isArray(row) || row.length < 8) continue;
-            const [date, volume, turnover, open, high, low, close, change] = row;
-            byDate.set(date, {
-              date,
-              name: response.name ?? symbol,
-              open: this.toNumber(open),
-              high: this.toNumber(high),
-              low: this.toNumber(low),
-              close: this.toNumber(close),
-              change: this.toNumber(change),
-              turnover: this.toNumber(turnover) * 1000,
-              volume: this.toNumber(volume) * 1000,
-            });
-          }
-        }
-        const targetDate = this.normalizeLookupDate(requestDate);
-        const targetKey = targetDate ? this.dateKey(targetDate) : Number.POSITIVE_INFINITY;
-        return Array.from(byDate.values())
-          .filter((point) => this.dateKey(point.date) <= targetKey)
-          .sort((left, right) => this.dateKey(left.date) - this.dateKey(right.date))
-          .slice(-Math.max(days, 1));
-      }),
+    return this.http.get<FinMindHistoryResponse>(
+      `${this.tpexProxyUrl}/api/history?symbol=${symbol}&start_date=${formatDate(start)}&end_date=${formatDate(target)}`,
+    ).pipe(
+      map((response) => (response.data ?? [])
+        .filter((row) => row.stock_id === symbol)
+        .map((row) => {
+          const [year, month, day] = row.date.split('-').map(Number);
+          return {
+            date: `${year - 1911}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`,
+            name: symbol,
+            open: row.open,
+            high: row.max,
+            low: row.min,
+            close: row.close,
+            change: row.spread,
+            turnover: row.Trading_money,
+            volume: row.Trading_Volume,
+          };
+        })
+        .sort((left, right) => this.dateKey(left.date) - this.dateKey(right.date))
+        .slice(-Math.max(days, 1))),
+      catchError(() => of([])),
     );
   }
-
   private getTpexLatestQuote(symbol: string): Observable<StockQuote | null> {
     return this.http.get<MisQuoteResponse>(`${this.tpexProxyUrl}/api/quote?symbol=${symbol}`).pipe(
       map((response) => {
