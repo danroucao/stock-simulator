@@ -19,10 +19,12 @@ export class PositionDetails {
   readonly feeDiscount = input(1);
   readonly positionChange = output<PositionInlineChange>();
   readonly positionClose = output<TradePosition>();
+  readonly positionDelete = output<string>();
   readonly positionGroupDelete = output<string>();
 
   protected readonly expandedSymbols = signal<Set<string>>(new Set());
   protected readonly pendingDeleteSymbol = signal<string | null>(null);
+  protected readonly pendingDeletePositionId = signal<string | null>(null);
   protected readonly groups = computed(() =>
     this.calculator.groupPositions(this.positions(), (symbol) => this.marketPriceFor(symbol), this.feeDiscount()),
   );
@@ -55,6 +57,19 @@ export class PositionDetails {
   protected confirmGroupDelete(symbol: string): void {
     this.positionGroupDelete.emit(symbol);
     this.pendingDeleteSymbol.set(null);
+  }
+
+  protected requestPositionDelete(id: string): void {
+    this.pendingDeletePositionId.set(id);
+  }
+
+  protected cancelPositionDelete(): void {
+    this.pendingDeletePositionId.set(null);
+  }
+
+  protected confirmPositionDelete(id: string): void {
+    this.positionDelete.emit(id);
+    this.pendingDeletePositionId.set(null);
   }
 
   protected marketPriceFor(symbol: string): number {

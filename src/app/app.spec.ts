@@ -123,6 +123,42 @@ describe('App', () => {
     expect(order.stopLossPrice).toBeUndefined();
     expect((fixture.nativeElement as HTMLElement).querySelector('.preset-order-row')?.textContent).toContain('未設定出場價');
   });
+
+  it('should edit an existing preset order without creating a duplicate', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    const order = {
+      id:'edit-preset', symbol:'2330', type:'現股多單', action:'buy', shares:1000,
+      entryPrice:620, exitPrice:680, validDays:5, createdAt:'2026-08-01', expiryDate:'2026-08-07', shareUnit:'boardLot',
+    };
+    app.presetOrders.set([order]);
+
+    app.editPresetOrder(order);
+    app.positionForm.update((form: any) => ({ ...form, entryPrice:630 }));
+    app.createPresetOrderFromForm();
+
+    expect(app.presetOrders().length).toBe(1);
+    expect(app.presetOrders()[0].id).toBe('edit-preset');
+    expect(app.presetOrders()[0].entryPrice).toBe(630);
+  });
+
+  it('should delete the selected board record only after confirmation', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    const originalCount = app.tradePositions().length;
+    const id = app.tradePositions()[0].id;
+
+    app.selectBoardRecord(id, 'position', 100, 100);
+    app.confirmSelectedBoardRecordDelete();
+    expect(app.tradePositions().length).toBe(originalCount);
+    app.requestSelectedBoardRecordDelete();
+    app.confirmSelectedBoardRecordDelete();
+
+    expect(app.tradePositions().length).toBe(originalCount - 1);
+    expect(app.tradePositions().some((position: any) => position.id === id)).toBe(false);
+  });
   it('should prevent sell preset orders when the selected stock has no sellable holding', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();

@@ -39,7 +39,16 @@
                 <td colspan="2"><label>目標價<input type="number" min="1" [value]="position.targetPrice" (input)="update(position.id, 'targetPrice', +($any($event.target).value || 1))" /></label></td>
                 <td colspan="2"><span class="target-hint">距目標 {{ ((position.targetPrice - marketPriceFor(position.symbol)) / marketPriceFor(position.symbol) * 100) | number:'1.1-1' }}%</span></td>
               </tr>
-              <tr class="position-actions-row"><td colspan="7"><button type="button" class="close-position-button" (click)="positionClose.emit(position)">以目前市價平倉</button></td></tr>
+              <tr class="position-actions-row"><td colspan="7">
+                @if (pendingDeletePositionId() === position.id) {
+                  <span>確定刪除這筆誤輸的持倉記錄？</span>
+                  <button type="button" class="delete-position-button confirm" (click)="confirmPositionDelete(position.id)">確認刪除</button>
+                  <button type="button" class="delete-position-button" (click)="cancelPositionDelete()">取消</button>
+                } @else {
+                  <button type="button" class="delete-position-button" (click)="requestPositionDelete(position.id)">刪除單筆記錄</button>
+                  <button type="button" class="close-position-button" (click)="positionClose.emit(position)">以目前市價平倉</button>
+                }
+              </td></tr>
             }
           </tbody>
         </table></div></div>

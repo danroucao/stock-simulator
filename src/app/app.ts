@@ -63,6 +63,13 @@ interface PresetMarker {
   dateLabel: string;
 }
 
+interface BoardRecordSelection {
+  id: string;
+  kind: 'position' | 'preset';
+  x: number;
+  y: number;
+}
+
 interface StockRecord {
   symbol: string;
   name: string;
@@ -126,6 +133,9 @@ export class App {
   protected readonly boardTooltip = signal<BoardTooltipState | null>(null);
   protected readonly draggingBoardMarker = signal<string | null>(null);
   protected readonly editingPositionId = signal<string | null>(null);
+  protected readonly editingPresetOrderId = signal<string | null>(null);
+  protected readonly selectedBoardRecord = signal<BoardRecordSelection | null>(null);
+  protected readonly pendingBoardRecordDelete = signal<string | null>(null);
   protected readonly orderEntryMode = signal<'holding' | 'preset'>('holding');
   protected readonly presetOrderAction = signal<PresetOrderAction>('buy');
   protected readonly shareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
@@ -715,8 +725,45 @@ export class App {
     this.boardTooltip.set(null);
   }
 
+  protected selectBoardRecord(id: string, kind: 'position' | 'preset', x: number, y: number): void {
+    this.selectedBoardRecord.set({ id, kind, x: x + 12, y: y + 12 });
+    this.pendingBoardRecordDelete.set(null);
+  }
+
+  protected editSelectedBoardRecord(): void {
+    const selected = this.selectedBoardRecord();
+    if (!selected) return;
+    if (selected.kind === 'position') {
+      const position = this.tradePositions().find((item) => item.id === selected.id);
+      if (position) this.editTradePosition(position);
+    } else {
+      const order = this.presetOrders().find((item) => item.id === selected.id);
+      if (order) this.editPresetOrder(order);
+    }
+    this.selectedBoardRecord.set(null);
+  }
+
+  protected requestSelectedBoardRecordDelete(): void {
+    const selected = this.selectedBoardRecord();
+    if (selected) this.pendingBoardRecordDelete.set(selected.id);
+  }
+
+  protected confirmSelectedBoardRecordDelete(): void {
+    const selected = this.selectedBoardRecord();
+    if (!selected || this.pendingBoardRecordDelete() !== selected.id) return;
+    selected.kind === 'position' ? this.removeTradePosition(selected.id) : this.removePresetOrder(selected.id);
+    this.selectedBoardRecord.set(null);
+    this.pendingBoardRecordDelete.set(null);
+  }
+
+  protected cancelSelectedBoardRecord(): void {
+    this.selectedBoardRecord.set(null);
+    this.pendingBoardRecordDelete.set(null);
+  }
+
   protected editTradePosition(position: TradePosition): void {
     this.orderEntryMode.set('holding');
+    this.editingPresetOrderId.set(null);
     this.editingPositionId.set(position.id);
     this.shareUnit.set(position.shares >= 1000 && position.shares % 1000 === 0 ? 'boardLot' : 'oddLot');
     this.positionForm.set({
@@ -728,6 +775,25 @@ export class App {
       note: position.note,
       tradeDate: position.tradeDate ?? this.todayInputValue(),
       stopLossPrice: position.stopLossPrice ?? position.entryPrice,
+    });
+  }
+
+  protected editPresetOrder(order: PresetOrder): void {
+    this.orderEntryMode.set('preset');
+    this.editingPositionId.set(null);
+    this.editingPresetOrderId.set(order.id);
+    this.presetOrderAction.set(order.action ?? 'buy');
+    this.shareUnit.set(order.shareUnit ?? (order.shares >= 1000 && order.shares % 1000 === 0 ? 'boardLot' : 'oddLot'));
+    if (order.expiryDate) this.onPresetExpiryChange(order.expiryDate);
+    this.positionForm.set({
+      symbol: order.symbol,
+      type: order.type,
+      shares: order.shares,
+      entryPrice: order.entryPrice,
+      targetPrice: order.exitPrice ?? 0,
+      note: '',
+      tradeDate: this.todayInputValue(),
+      stopLossPrice: order.stopLossPrice,
     });
   }
 
@@ -952,7 +1018,8 @@ export class App {
     const shares = action === 'sell'
       ? Math.min(this.normalizedOrderShares(form.shares), this.sellableFormStockShares())
       : this.normalizedOrderShares(form.shares);
-    this.presetOrders.update((orders) => [...orders, {
+    const editingId = this.editingPresetOrderId();
+    const updatedOrder: PresetOrder = {
       id: `preset-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       symbol,
       type: form.type,
@@ -965,7 +1032,11 @@ export class App {
       expiryDate: this.presetExpiryDate(),
       shareUnit: this.shareUnit(),
       stopLossPrice: form.stopLossPrice,
-    }]);
+    };
+    this.presetOrders.update((orders) => editingId
+      ? orders.map((order) => order.id === editingId ? { ...updatedOrder, id: editingId, createdAt: order.createdAt } : order)
+      : [...orders, updatedOrder]);
+    this.editingPresetOrderId.set(null);
   }
 
   protected createPresetOrder(): void {
@@ -984,6 +1055,7 @@ export class App {
 
   protected removePresetOrder(id: string): void {
     this.presetOrders.update((orders) => orders.filter((order) => order.id !== id));
+    if (this.editingPresetOrderId() === id) this.editingPresetOrderId.set(null);
   }
 
   protected presetProfit(order: PresetOrder): number {
