@@ -1216,28 +1216,52 @@ export class App {
   }
   private buildStockStressScenario(id: string, name: string, assumption: string, shock: number, respectStops: boolean): StressScenario {
     const scenarioPrice = this.valuationPrice() * (1 + shock);
-    const holdingProfit = this.currentStockPositions().reduce((total, position) => {
+    const positions = this.currentStockPositions();
+    const stressProfitForPosition = (position: TradePosition, shares: number) => {
       const configuredTarget = position.targetPrice > 0 && position.targetPrice !== position.entryPrice
         ? position.targetPrice : undefined;
-      return total + this.portfolioCalculator.simulateOrder(
+      return this.portfolioCalculator.simulateOrder(
         position.entryPrice,
         this.scenarioExitPrice(scenarioPrice, position.type, position.stopLossPrice, configuredTarget, respectStops),
-        position.type, position.shares,
+        position.type, shares,
         this.calendarDaysBetween(position.tradeDate, this.todayInputValue()),
         this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
       );
-    }, 0);
+    };
+    const holdingProfit = positions.reduce((total, position) => total + stressProfitForPosition(position, position.shares), 0);
+    const remainingShares = new Map(positions.map((position) => [position.id, position.shares]));
+    let stressedShares = positions.reduce((total, position) => total + position.shares, 0);
     const presetProfit = this.currentStockPresetOrders().reduce((total, order) => {
-      if (order.action === 'sell') return total + (scenarioPrice >= order.entryPrice ? this.sellHoldingProfit(order, order.entryPrice) : 0);
+      if (order.action === 'sell') {
+        if (scenarioPrice < order.entryPrice) return total;
+        let sharesToSell = order.shares;
+        let adjustment = 0;
+        for (const position of positions) {
+          if (sharesToSell <= 0) break;
+          if (position.type !== '現股多單' && position.type !== '融資') continue;
+          const availableShares = remainingShares.get(position.id) ?? 0;
+          const soldShares = Math.min(availableShares, sharesToSell);
+          if (soldShares <= 0) continue;
+          const holdingDays = this.calendarDaysBetween(position.tradeDate, this.todayInputValue());
+          const realizedProfit = this.portfolioCalculator.simulateOrder(
+            position.entryPrice, order.entryPrice, position.type, soldShares, holdingDays,
+            this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+          );
+          adjustment += realizedProfit - stressProfitForPosition(position, soldShares);
+          remainingShares.set(position.id, availableShares - soldShares);
+          sharesToSell -= soldShares;
+          stressedShares -= soldShares;
+        }
+        return total + adjustment;
+      }
+      stressedShares += order.shares;
       return total + this.portfolioCalculator.simulateOrder(
         order.entryPrice, this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops), order.type, order.shares, order.validDays,
         this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
       );
     }, 0);
     const totalProfit = holdingProfit + presetProfit;
-    const stressedExposure = scenarioPrice * (
-      this.currentStockHoldingShares() + this.currentStockPresetOrders().reduce((sum, order) => sum + order.shares, 0)
-    );
+    const stressedExposure = scenarioPrice * stressedShares;
     const criticalLoss = Math.max(this.maxRiskPerTrade() * 2, 20_000);
     const severity: StressScenario['severity'] = totalProfit < -criticalLoss
       ? 'critical' : totalProfit < 0 ? 'warning' : 'normal';

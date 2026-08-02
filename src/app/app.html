@@ -340,9 +340,9 @@
 
       <section class="stock-stress-panel" [class.collapsed]="collapsedPanels().has('stress')" aria-labelledby="stress-title">
         <div class="panel-header"><div><span class="section-eyebrow">隔日個股風險</span><h3 id="stress-title">{{ stockSymbol() }} 持倉／預設單壓力測試</h3></div><div class="panel-header-actions"><span class="badge">{{ stressScenarios().length }} 種情境</span><button type="button" class="collapse-button" (click)="togglePanel('stress')" [attr.aria-expanded]="!collapsedPanels().has('stress')">⌃</button></div></div>
-        <div class="stress-summary"><span>計算基準 <strong>{{ valuationPrice() | number:'1.0-2' }}</strong></span><span>{{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><span>預設單假設已於進場價成交</span></div>
+        <div class="stress-summary"><span>計算基準 <strong>{{ valuationPrice() | number:'1.0-2' }}</strong></span><span>{{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><span>預設買入假設成交；預設賣出於情境價達標時觸發</span></div>
         <div class="stress-table-wrap"><table class="stress-table stock-stress-table">
-          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>預設單損益</th><th>合計損益</th><th>總曝險</th><th>狀態</th></tr></thead>
+          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>預設單影響</th><th>合計損益</th><th>成交後曝險</th><th>狀態</th></tr></thead>
           <tbody>@for (scenario of stressScenarios(); track scenario.id) {
             <tr [class.warning]="scenario.severity === 'warning'" [class.critical]="scenario.severity === 'critical'">
               <td><strong>{{ scenario.name }}</strong><small>{{ scenario.assumption }}</small></td><td>{{ scenario.scenarioPrice | number:'1.0-2' }}</td>

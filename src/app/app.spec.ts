@@ -300,6 +300,48 @@ describe('App', () => {
     expect(gradualLimit.presetProfit).not.toBe(gapLimit.presetProfit);
   });
 
+  it('should replace holding valuation with realized profit when a sell preset is triggered', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    const position = {
+      id:'sell-stress-holding', symbol:'2330', type:'現股多單', shares:1000,
+      entryPrice:600, targetPrice:600, note:'', tradeDate:'2026-07-31',
+    };
+    const sellOrder = {
+      id:'sell-stress-order', symbol:'2330', type:'現股多單', action:'sell', shares:1000,
+      entryPrice:660, validDays:5, createdAt:new Date().toISOString(),
+    };
+    app.tradePositions.set([position]);
+    app.presetOrders.set([sellOrder]);
+
+    const scenario = app.stressScenarios().find((item: any) => item.id === 'up-5');
+    const expectedRealizedProfit = app.portfolioCalculator.simulateOrder(
+      600, 660, '現股多單', 1000, app.calendarDaysBetween(position.tradeDate, app.todayInputValue()),
+      app.financingRate(), app.shortBorrowRate(), app.feeDiscount(),
+    );
+    expect(scenario.totalProfit).toBeCloseTo(expectedRealizedProfit);
+    expect(scenario.stressedExposure).toBe(0);
+  });
+
+  it('should not allocate the same holding shares to multiple sell presets', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    app.tradePositions.set([{
+      id:'shared-holding', symbol:'2330', type:'現股多單', shares:1000,
+      entryPrice:600, targetPrice:600, note:'', tradeDate:'2026-07-31',
+    }]);
+    app.presetOrders.set([
+      { id:'sell-a', symbol:'2330', type:'現股多單', action:'sell', shares:700, entryPrice:660, validDays:5, createdAt:new Date().toISOString() },
+      { id:'sell-b', symbol:'2330', type:'現股多單', action:'sell', shares:700, entryPrice:670, validDays:5, createdAt:new Date().toISOString() },
+    ]);
+
+    const scenario = app.stressScenarios().find((item: any) => item.id === 'up-10');
+    expect(scenario.stressedExposure).toBe(0);
+    expect(scenario.presetProfit).toBeGreaterThan(-scenario.holdingProfit);
+  });
+
   it('should not treat a holding placeholder target equal to entry as a take-profit order', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
