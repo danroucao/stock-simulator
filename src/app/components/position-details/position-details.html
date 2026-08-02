@@ -15,7 +15,17 @@
       </button>
 
       @if (expandedSymbols().has(group.symbol)) {
-        <div class="position-group-body"><div class="position-profit-table-wrap"><table class="position-profit-table">
+        <div class="position-group-body">
+          <div class="position-group-actions">
+            @if (pendingDeleteSymbol() === group.symbol) {
+              <span>確定刪除 {{ group.symbol }} 的全部 {{ group.positions.length }} 筆持倉記錄？</span>
+              <button type="button" class="delete-position-group-button confirm" (click)="confirmGroupDelete(group.symbol)">確認刪除</button>
+              <button type="button" class="delete-position-group-button" (click)="cancelGroupDelete()">取消</button>
+            } @else {
+              <button type="button" class="delete-position-group-button" (click)="requestGroupDelete(group.symbol)">刪除此個股持倉記錄</button>
+            }
+          </div>
+          <div class="position-profit-table-wrap"><table class="position-profit-table">
           <thead><tr><th>方向</th><th>股數</th><th>買入價</th><th>投入成本</th><th>目前市值</th><th>實際盈虧</th><th>報酬率</th></tr></thead>
           <tbody>
             @for (position of group.positions; track position.id) {

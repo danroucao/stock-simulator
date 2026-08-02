@@ -381,6 +381,7 @@
         [feeDiscount]="feeDiscount()"
         (positionChange)="onPositionInlineChange($event)"
         (positionClose)="closeTradePosition($event)"
+        (positionGroupDelete)="deletePositionGroup($event)"
       />
       @if (closedTrades().length) {
         <section class="closed-trade-list"><h3>已實現交易</h3>

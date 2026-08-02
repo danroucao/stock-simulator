@@ -807,6 +807,10 @@ export class App {
     this.removeTradePosition(position.id);
   }
 
+  protected deletePositionGroup(symbol: string): void {
+    this.tradePositions.update((positions) => positions.filter((position) => position.symbol !== symbol));
+  }
+
   protected togglePanel(panel: string): void {
     const next = new Set(this.collapsedPanels());
     next.has(panel) ? next.delete(panel) : next.add(panel);

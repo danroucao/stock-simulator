@@ -78,6 +78,21 @@ describe('App', () => {
     expect(compiled.querySelectorAll('.position-profit-table tbody .position-actions-row').length).toBe(2);
   });
 
+  it('should delete all holding records for one stock after confirmation', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const app = fixture.componentInstance as any;
+    app.tradePositions.set([
+      { id: 'a', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 600, targetPrice: 700, note: '' },
+      { id: 'b', symbol: '2330', type: '融資', shares: 1000, entryPrice: 610, targetPrice: 700, note: '' },
+      { id: 'c', symbol: '2317', type: '現股多單', shares: 1000, entryPrice: 180, targetPrice: 200, note: '' },
+    ]);
+
+    app.deletePositionGroup('2330');
+
+    expect(app.tradePositions().map((position: any) => position.id)).toEqual(['c']);
+  });
+
   it('should create a near-term preset order from the unified order board', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
