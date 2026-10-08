@@ -8,7 +8,10 @@
     "worker:check": "wrangler deploy --config worker/wrangler.jsonc --dry-run",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "verify:trading": "node scripts/verify-trading-flow.mjs",
+    "verify:tabs": "node scripts/verify-storage-tabs.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs"
   },
   "private": true,
   "packageManager": "npm@11.18.0",

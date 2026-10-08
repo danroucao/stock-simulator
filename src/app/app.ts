@@ -1,6 +1,12 @@
-import { DecimalPipe } from '@angular/common';
+﻿import { DecimalPipe } from '@angular/common';
 import { calculateVolumeIndicators } from './services/volume-indicators';
 import { PresetFill } from './models/trade-position.model';
+import { validateWorkspaceBackup } from './services/workspace-backup';
+import { planningReference } from './services/planning-reference';
+import { compareDailyReturns } from './services/return-analysis';
+import { forkJoin } from 'rxjs';
+import { simulatePlannedTrade } from './services/planned-trade-simulation';
+import { isTradingDate, hasTradingCalendar } from './services/trading-calendar';
 import { Component, computed, signal, DestroyRef, inject, effect, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
@@ -92,6 +98,8 @@ interface StressScenario {
   totalProfit: number;
   stressedExposure: number;
   severity: 'normal' | 'warning' | 'critical';
+  changeFromNow: number;
+  details: Array<{ label: string; shares: number; entry: number; exit: number; reason: string; costs: number; contribution: number; remaining?: number }>;
 }
 
 @Component({
@@ -128,12 +136,73 @@ export class App {
   protected readonly maxStockWeight = signal(25);
   protected readonly quoteDate = signal('');
   protected readonly quoteChange = signal(0);
+  protected readonly quoteSource = signal('');
+  protected readonly quoteSourceTime = signal('');
+  protected readonly quoteFetchedAt = signal('');
+  protected readonly priceAlerts = signal<Record<string, { lower?: number; upper?: number }>>({});
+  protected readonly currentPriceAlert = computed(() => this.priceAlerts()[this.stockSymbol()] ?? {});
+  protected readonly priceAlertMessage = computed(() => {
+    const alert = this.currentPriceAlert(), price = this.latestPrice();
+    if (!(price > 0)) return '';
+    if (alert.lower !== undefined && price <= alert.lower) return `${this.stockSymbol()} 行情 ${price} 已達下限 ${alert.lower}`;
+    if (alert.upper !== undefined && price >= alert.upper) return `${this.stockSymbol()} 行情 ${price} 已達上限 ${alert.upper}`;
+    return '';
+  });
+  protected readonly priceAlertError = signal('');
+  protected readonly costModel = computed(() => this.portfolioCalculator.costSettings());
+  protected readonly costModelError = signal('');
+  protected openWorkspaceSettings(): void {
+    const details = document.querySelector<HTMLDetailsElement>('#workspace-settings > details');
+    if (details) details.open = true;
+  }
+  protected readonly numericSettingsError = signal('');
+  protected updateNumericSetting(key: 'availableCash' | 'maxRiskPerTrade' | 'maxStockWeight' | 'feeDiscount' | 'cashOpeningBalance', raw: string): void {
+    const value = Number(raw);
+    const minimum = key === 'maxRiskPerTrade' || key === 'maxStockWeight' ? 1 : key === 'cashOpeningBalance' ? -Number.MAX_VALUE : 0;
+    const maximum = key === 'feeDiscount' ? 1 : key === 'maxStockWeight' ? 100 : Number.MAX_VALUE;
+    if (!raw.trim() || !Number.isFinite(value) || value < minimum || value > maximum) {
+      this.numericSettingsError.set('輸入超出允許範圍或不是有效數字，已保留原設定。'); return;
+    }
+    this.numericSettingsError.set('');
+    this[key].set(value);
+  }
+  protected updateCostModel(key: 'feeRate' | 'minimumFee' | 'taxRate' | 'financingLoanRatio', raw: string): void {
+    const value = Number(raw);
+    if (!raw.trim() || !Number.isFinite(value) || value < 0 || (key !== 'minimumFee' && value > 1)) { this.costModelError.set('請輸入有效數值；比例以小數表示，範圍 0～1。'); return; }
+    this.costModelError.set('');
+    this.portfolioCalculator.costSettings.update(settings => ({ ...settings, [key]: value }));
+  }
+  protected readonly stockIndustries = signal<Record<string, string>>({});
+  protected setStockIndustry(symbol: string, industry: string): void {
+    this.stockIndustries.update(values => ({ ...values, [symbol]: industry.trim().slice(0, 40) }));
+  }
+  protected readonly industryExposure = computed(() => {
+    const groups = new Map<string, number>();
+    for (const position of this.tradePositions()) {
+      const label = this.stockIndustries()[position.symbol] || '未分類';
+      groups.set(label, (groups.get(label) ?? 0) + this.marketPriceForSymbol(position.symbol) * position.shares);
+    }
+    const total = [...groups.values()].reduce((sum, value) => sum + value, 0);
+    return [...groups].map(([industry, value]) => ({ industry, value, weight: total > 0 ? value / total * 100 : 0 })).sort((a, b) => b.value - a.value);
+  });
+  protected updatePriceAlert(key: 'lower' | 'upper', value: string): void {
+    const next = { ...this.currentPriceAlert(), [key]: value.trim() ? Number(value) : undefined };
+    if ((next.lower !== undefined && (!Number.isFinite(next.lower) || next.lower <= 0)) || (next.upper !== undefined && (!Number.isFinite(next.upper) || next.upper <= 0)) || (next.lower !== undefined && next.upper !== undefined && next.lower >= next.upper)) {
+      this.priceAlertError.set('價格須大於 0，且下限須低於上限。未保存此變更。'); return;
+    }
+    this.priceAlertError.set('');
+    this.priceAlerts.update(alerts => ({ ...alerts, [this.stockSymbol()]: next }));
+  }
+  protected readonly estimatedPriceSymbols = computed(() => [...new Set(this.tradePositions().filter(position =>
+    !(this.latestPrices()[position.symbol] > 0) && !(position.symbol === this.stockSymbol() && this.latestPrice() > 0),
+  ).map(position => position.symbol))]);
   protected readonly latestPrice = signal(0);
   protected readonly turnover = signal(0);
   protected readonly isLoadingQuote = signal(false);
   protected readonly quoteError = signal('');
   protected readonly history = signal<StockHistoryPoint[]>([]);
   private readonly indicatorHistory = signal<StockHistoryPoint[]>([]);
+  protected readonly planningLevels = computed(() => planningReference(this.indicatorHistory()));
   private readonly destroyRef = inject(DestroyRef);
   private liveRequestId = 0;
   protected readonly liveEnabled = signal(false);
@@ -141,7 +210,46 @@ export class App {
   protected readonly liveStatus = signal('');
   private historyRequestId = 0;
   private quoteRequestId = 0;
-  protected readonly todayDate = computed(() => this.todayInputValue());
+  protected readonly todayDate = signal(this.todayInputValue());
+  protected readonly storageConflict = signal(false);
+  private expectedStoredWorkspace: string | null = null;
+
+  protected refreshCalendar(): void {
+    const today = this.todayInputValue(), previous = this.todayDate();
+    if (today === previous) return;
+    this.todayDate.set(today);
+    if (!this.editingPresetOrderId()) this.onPresetExpiryChange(this.presetExpiryDate());
+    if (this.requestedDate() === previous) {
+      this.requestedDate.set(today);
+      this.loadCurrentPrice();
+    }
+  }
+
+  protected useOtherTabWorkspace(): void {
+    try {
+      const raw = localStorage.getItem(this.workspaceStorageKey);
+      if (!raw) throw new Error('另一分頁已清除資料，請保留目前資料或先匯出備份。');
+      validateWorkspaceBackup(raw);
+      this.restoreWorkspace();
+      this.storageConflict.set(false);
+      this.autoSaveEnabled.set(true);
+      this.editingPositionId.set(null);
+      this.editingPresetOrderId.set(null);
+      this.fillOrderId.set(null);
+      this.closingPositionId.set(null);
+      this.loadCurrentPrice();
+    } catch (error) { this.saveError.set(error instanceof Error ? error.message : '無法讀取另一分頁資料。'); }
+  }
+
+  protected keepThisTabWorkspace(): void {
+    try {
+      const other = localStorage.getItem(this.workspaceStorageKey);
+      if (other) localStorage.setItem(`${this.workspaceStorageKey}-before-conflict`, other);
+      this.expectedStoredWorkspace = other;
+      this.storageConflict.set(false);
+      this.saveWorkspace();
+    } catch { this.saveError.set('無法備份衝突資料，已停止覆寫。'); }
+  }
   protected readonly historyLoading = signal(false);
   protected readonly historyError = signal('');
   protected readonly chartIndicators = signal({ obv: true, adl: true, histogram: true });
@@ -209,6 +317,54 @@ export class App {
   protected readonly autoSaveEnabled = signal(true);
   protected readonly saveError = signal('');
   protected readonly backupStatus = signal('');
+  protected readonly importPreview = signal<{ raw: string; filename: string; positions: number; orders: number; fills: number; stocks: number } | null>(null);
+  protected async readWorkspaceBackup(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.importPreview.set(null);
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('備份檔請小於 5 MB。');
+      const saved = validateWorkspaceBackup(await file.text());
+      this.importPreview.set({ raw: JSON.stringify(saved), filename: file.name, positions: saved['tradePositions'].length, orders: saved['presetOrders'].length, fills: saved['presetFills'].length, stocks: saved['stockRecords'].length });
+      this.backupStatus.set('檔案驗證完成，請核對筆數後確認還原。');
+    } catch (error) {
+      this.backupStatus.set(`匯入失敗：${error instanceof Error ? error.message : '檔案格式不正確'}。目前資料未變更。`);
+    }
+  }
+  protected confirmWorkspaceImport(): void {
+    const preview = this.importPreview();
+    if (!preview) return;
+    if (this.storageConflict() || localStorage.getItem(this.workspaceStorageKey) !== this.expectedStoredWorkspace) {
+      this.storageConflict.set(true);
+      this.autoSaveEnabled.set(false);
+      this.backupStatus.set('另一分頁資料已變更，請先解決儲存衝突再匯入。'); return;
+    }
+    try {
+      validateWorkspaceBackup(preview.raw);
+      localStorage.setItem(`${this.workspaceStorageKey}-before-import`, this.workspaceBackupJson());
+      localStorage.setItem(this.workspaceStorageKey, preview.raw);
+    } catch {
+      this.backupStatus.set('無法保留還原前備份或寫入資料，已停止還原，目前資料未變更。'); return;
+    }
+    this.restoreWorkspace();
+    this.importPreview.set(null);
+    this.closingPositionId.set(null);
+    this.fillOrderId.set(null);
+    this.editingPositionId.set(null);
+    this.editingPresetOrderId.set(null);
+    this.backupStatus.set('已還原備份；還原前資料已保留在目前瀏覽器。');
+    this.loadCurrentPrice();
+  }
+  protected previewBeforeImportBackup(): void {
+    try {
+      const raw = localStorage.getItem(`${this.workspaceStorageKey}-before-import`);
+      if (!raw) { this.backupStatus.set('目前瀏覽器尚無還原前備份。'); return; }
+      const saved = validateWorkspaceBackup(raw);
+      this.importPreview.set({ raw: JSON.stringify(saved), filename: '還原前自動備份', positions: saved['tradePositions'].length, orders: saved['presetOrders'].length, fills: saved['presetFills'].length, stocks: saved['stockRecords'].length });
+    } catch { this.backupStatus.set('無法讀取還原前備份，目前資料未變更。'); }
+  }
   protected readonly exportingExcel = signal(false);
   protected readonly orderStatus = signal('');
   protected readonly pendingPresetCancel = signal<string | null>(null);
@@ -227,14 +383,107 @@ export class App {
   protected readonly fillShares = signal(0);
   protected readonly fillDate = signal(this.todayInputValue());
   protected readonly fillMessage = signal('');
+  protected readonly cashTrackingEnabled = signal(false);
+  protected readonly cashOpeningBalance = signal(0);
+  protected readonly cashMovements = signal<Array<{ id: string; date: string; kind: string; amount: number; note: string }>>([]);
+  protected readonly trackedCashBalance = computed(() => this.cashOpeningBalance() + this.cashMovements().reduce((sum, movement) => sum + movement.amount, 0));
+  protected readonly cashMovementAmount = signal(0);
+  protected readonly cashMovementKind = signal<'deposit' | 'withdrawal'>('deposit');
+  protected readonly cashMovementNote = signal('');
+  protected readonly cashLedgerStatus = signal('');
+  protected addManualCashMovement(): void {
+    const amount = this.cashMovementAmount();
+    if (!Number.isFinite(amount) || amount <= 0) { this.cashLedgerStatus.set('請輸入大於 0 的金額。'); return; }
+    this.cashMovements.update(items => [...items, { id: crypto.randomUUID(), date: this.todayInputValue(), kind: this.cashMovementKind() === 'deposit' ? '存入' : '支出', amount: this.cashMovementKind() === 'deposit' ? amount : -amount, note: this.cashMovementNote().trim() }]);
+    this.cashMovementAmount.set(0);
+    this.cashMovementNote.set('');
+    this.cashLedgerStatus.set('已新增手動流水；規劃資金不會自動改變。');
+  }
+  protected applyTrackedCash(): void {
+    if (this.trackedCashBalance() >= 0) { this.availableCash.set(this.trackedCashBalance()); this.cashLedgerStatus.set('已將流水餘額帶入規劃資金。'); }
+  }
+  private recordCashTrade(id: string, date: string, price: number, shares: number, sell: boolean, type: OrderType): void {
+    if (!this.cashTrackingEnabled()) return;
+    if (type !== '現股多單') { this.cashLedgerStatus.set('此筆非現股交易，未自動寫入資金流水；保證金或融資交割需自行核對。'); return; }
+    const costs = this.portfolioCalculator.tradeCosts(price, price, type, shares, 1, 0, 0, this.feeDiscount());
+    const amount = sell ? price * shares - costs.sellFee - costs.transactionTax : -price * shares - costs.buyFee;
+    this.cashMovements.update(items => [...items, { id, date, kind: sell ? '現股賣出' : '現股買進', amount, note: `${shares} 股 × ${price} 元；模型費稅估算` }]);
+  }
+  private tradeStateJson(): string {
+    return JSON.stringify({ positions: this.tradePositions(), orders: this.presetOrders(), closed: this.closedTrades(), fills: this.presetFills(), archived: this.archivedPresetOrders(), cash: this.cashMovements() });
+  }
+  protected readonly lastTradeUndo = signal<{ before: string; after: string; description: string } | null>(null);
+  protected readonly confirmUndoTrade = signal(false);
+  protected readonly undoTradeStatus = signal('');
+  protected readonly canUndoTrade = computed(() => {
+    const undo = this.lastTradeUndo();
+    return !!undo && this.tradeStateJson() === undo.after;
+  });
+  protected undoLastTradeRecord(): void {
+    const undo = this.lastTradeUndo();
+    if (!undo || !this.confirmUndoTrade()) return;
+    if (!this.canUndoTrade()) { this.undoTradeStatus.set('後續交易資料已改變，無法安全撤回。請保留備份後核對紀錄。'); return; }
+    const prior = JSON.parse(undo.before);
+    this.tradePositions.set(prior.positions);
+    this.presetOrders.set(prior.orders);
+    this.closedTrades.set(prior.closed);
+    this.presetFills.set(prior.fills);
+    this.archivedPresetOrders.set(prior.archived);
+    this.cashMovements.set(prior.cash ?? []);
+    this.lastTradeUndo.set(null);
+    this.confirmUndoTrade.set(false);
+    this.fillOrderId.set(null);
+    this.closingPositionId.set(null);
+    this.fillMessage.set('');
+    this.closingStatus.set('');
+    this.undoTradeStatus.set('已撤回網站最近一次成交記錄；持倉、委託與損益已還原，券商實際成交不受影響。');
+  }
+  protected readonly closingPositionId = signal<string | null>(null);
+  protected readonly closingPrice = signal(0);
+  protected readonly closingShares = signal(0);
+  protected readonly closingDate = signal(this.todayInputValue());
+  protected readonly closingStatus = signal('');
+  protected readonly closingPosition = computed(() => this.tradePositions().find(position => position.id === this.closingPositionId()));
+  protected readonly closingIsShort = computed(() => this.closingPosition()?.type === '空單' || this.closingPosition()?.type === '融券');
+  protected readonly closingError = computed(() => {
+    const position = this.closingPosition();
+    if (!position) return '原持倉已不存在。';
+    if (!Number.isFinite(this.closingPrice()) || this.closingPrice() <= 0) return '成交價須大於 0。';
+    if (!Number.isInteger(this.closingShares()) || this.closingShares() <= 0 || this.closingShares() > position.shares) return '成交股數須介於 1 與剩餘持倉股數之間。';
+    const date = this.closingDate();
+    const parsed = new Date(`${date}T00:00:00`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsed.getTime()) || this.toInputDate(parsed) !== date || date > this.todayInputValue() || (position.tradeDate && date < position.tradeDate)) return '成交日期須在入倉日與今天之間。';
+    return '';
+  });
+  protected readonly closingPreview = computed(() => {
+    const position = this.closingPosition();
+    if (!position || this.closingError()) return null;
+    const days = this.calendarDaysBetween(position.tradeDate, this.closingDate());
+    const costs = this.portfolioCalculator.positionExitCosts(position, this.closingPrice(), this.closingShares(), days,
+      this.financingRate(), this.shortBorrowRate(), this.feeDiscount());
+    const gross = (this.closingIsShort() ? position.entryPrice - this.closingPrice() : this.closingPrice() - position.entryPrice) * this.closingShares();
+    return { costs, gross, net: gross - costs.total, remaining: position.shares - this.closingShares() };
+  });
   protected readonly presetFills = signal<PresetFill[]>([]);
+  protected readonly archivedPresetOrders = signal<Array<PresetOrder & { finalStatus: '已成交' | '取消'; finalizedAt: string }>>([]);
+  protected readonly orderHistory = computed(() => [
+    ...this.presetOrders().map(order => ({ ...order, status: this.isPresetExpired(order) ? '過期' : this.presetFills().some(fill => fill.orderId === order.id) ? '部分成交' : '待成交' })),
+    ...this.archivedPresetOrders().map(order => ({ ...order, status: order.finalStatus })),
+  ].filter(order => this.fillHistoryScope() === 'all' || order.symbol === this.stockSymbol()).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  protected readonly hasSamplePositions = computed(() => this.tradePositions().some(position => position.id === 'sample-long' || position.id === 'sample-short'));
+  protected readonly confirmRemoveSamples = signal(false);
+  protected removeSamplePositions(): void {
+    if (!this.confirmRemoveSamples()) return;
+    this.tradePositions.update(items => items.filter(position => position.id !== 'sample-long' && position.id !== 'sample-short'));
+    this.confirmRemoveSamples.set(false);
+  }
   protected readonly fillHistoryScope = signal<'current' | 'all'>('current');
   protected readonly visiblePresetFills = computed(() => [...this.presetFills()]
     .filter(fill => this.fillHistoryScope() === 'all' || fill.symbol === this.stockSymbol())
     .sort((a, b) => b.date.localeCompare(a.date) || b.recordedAt.localeCompare(a.recordedAt)));
 
   protected isPresetExpired(order: PresetOrder): boolean {
-    return !!order.expiryDate && order.expiryDate < this.todayInputValue();
+    return !!order.expiryDate && order.expiryDate < this.todayDate();
   }
 
   protected startPresetFill(order: PresetOrder): void {
@@ -257,6 +506,7 @@ export class App {
       this.fillMessage.set('成交日期須在建立日與有效期限之間，且不可晚於今天。'); return;
     }
     const id = `fill-${crypto.randomUUID()}`;
+    const undoBefore = this.tradeStateJson();
     if (order.action === 'sell') {
       const positions = this.tradePositions().filter(position => position.symbol === order.symbol && position.type === order.type && (!position.tradeDate || position.tradeDate <= date))
         .sort((a, b) => (a.tradeDate ?? '').localeCompare(b.tradeDate ?? ''));
@@ -271,21 +521,30 @@ export class App {
         if (!quantity) break;
         sold.set(position.id, quantity);
         closed.push({ ...position, id: `${id}-${position.id}`, shares: quantity, exitPrice: price, exitDate: date,
-          realizedProfit: this.portfolioCalculator.simulateOrder(position.entryPrice, price, position.type, quantity,
-            this.calendarDaysBetween(position.tradeDate, date), this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) });
+          ...this.tradeCostSnapshot(position.entryPrice, price, position.type, quantity, this.calendarDaysBetween(position.tradeDate, date), position),
+          realizedProfit: (position.type === '空單' || position.type === '融券' ? position.entryPrice - price : price - position.entryPrice) * quantity - this.portfolioCalculator.positionExitCosts(position, price, quantity,
+            this.calendarDaysBetween(position.tradeDate, date), this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total });
         remaining -= quantity;
       }
-      this.tradePositions.update(items => items.map(position => ({ ...position, shares: position.shares - (sold.get(position.id) ?? 0) })).filter(position => position.shares > 0));
+      this.tradePositions.update(items => items.map(position => this.reducePositionShares(position, sold.get(position.id) ?? 0)).filter(position => position.shares > 0));
       this.closedTrades.update(items => [...items, ...closed]);
     } else {
+      const entryCosts = this.portfolioCalculator.tradeCosts(price, price, order.type, shares, 1, 0, 0, this.feeDiscount());
+      const short = order.type === '空單' || order.type === '融券';
       this.tradePositions.update(items => [...items, { id, symbol: order.symbol, type: order.type, shares,
+        entryFeePaid: short ? entryCosts.sellFee : entryCosts.buyFee, entryTaxPaid: short ? entryCosts.transactionTax : 0,
         entryPrice: price, targetPrice: order.exitPrice ?? price, stopLossPrice: order.stopLossPrice,
         tradeDate: date, note: `${order.note ?? ''} 預設單成交：${order.id}`.trim() }]);
     }
     this.presetOrders.update(items => items.flatMap(item => item.id !== order.id ? [item] : item.shares > shares ? [{ ...item, shares: item.shares - shares }] : []));
+    if (shares === order.shares) this.archivedPresetOrders.update(items => [...items, { ...order, shares: 0, finalStatus: '已成交', finalizedAt: new Date().toISOString() }]);
     this.presetFills.update(items => [...items, { id, orderId: order.id, symbol: order.symbol, type: order.type,
       action: order.action ?? 'buy', date, price, shares, plannedPrice: order.entryPrice,
       remainingShares: order.shares - shares, recordedAt: new Date().toISOString(), note: order.note ?? '' }]);
+    this.recordCashTrade(id, date, price, shares, order.action === 'sell', order.type);
+    this.lastTradeUndo.set({ before: undoBefore, after: this.tradeStateJson(), description: `${order.symbol} 預設單成交 ${shares} 股` });
+    this.confirmUndoTrade.set(false);
+    this.undoTradeStatus.set('');
     if (this.editingPresetOrderId() === order.id) this.editingPresetOrderId.set(null);
     this.fillOrderId.set(null);
     this.fillMessage.set(`已記錄 ${order.symbol} 成交 ${shares} 股，${order.action === 'sell' ? '已更新持倉與已實現損益' : '已轉入持倉'}；剩餘 ${order.shares - shares} 股。`);
@@ -307,7 +566,8 @@ export class App {
     if (!Number.isFinite(form.targetPrice) || form.targetPrice < 0) return '預計出場價須大於 0，或留空。';
     if (this.orderEntryMode() === 'preset' && this.presetOrderAction() === 'sell') {
       if (!this.canCreateSellPreset()) return '此股票沒有可供賣出的持倉。';
-      if (form.shares > this.sellableFormStockShares()) return '委託股數超過可賣持倉，請調整股數。';
+      if (form.type !== '現股多單' && form.type !== '融資') return '賣出持倉請選擇現股多單或融資；空單請使用持倉回補流程。';
+      if (form.shares > this.availableSellOrderShares()) return '合計賣出委託超過此交易類型的持倉，請調整股數或取消其他賣出單。';
     }
     return '';
   });
@@ -378,15 +638,16 @@ export class App {
   private readonly workspaceContent = computed(() => JSON.stringify({
     stockSymbol: this.stockSymbol(), stockName: this.stockName(), stockRecords: this.stockRecords(),
     latestPrices: this.latestPrices(), tradePositions: this.tradePositions(), presetOrders: this.presetOrders(),
-    closedTrades: this.closedTrades(), presetFills: this.presetFills(), chartIndicators: this.chartIndicators(), availableCash: this.availableCash(), maxRiskPerTrade: this.maxRiskPerTrade(),
+    closedTrades: this.closedTrades(), presetFills: this.presetFills(), archivedPresetOrders: this.archivedPresetOrders(), chartIndicators: this.chartIndicators(), priceAlerts: this.priceAlerts(), stockIndustries: this.stockIndustries(), costModel: this.costModel(), cashMovements: this.cashMovements(), cashOpeningBalance: this.cashOpeningBalance(), cashTrackingEnabled: this.cashTrackingEnabled(), availableCash: this.availableCash(), maxRiskPerTrade: this.maxRiskPerTrade(),
     maxStockWeight: this.maxStockWeight(), feeDiscount: this.feeDiscount(),
   }));
   protected readonly hasUnsavedChanges = computed(() => this.workspaceContent() !== this.savedWorkspaceContent());
   protected readonly holdingViewMode = signal<'current' | 'all'>('all');
   protected readonly nearTermDays = signal(5);
   protected readonly presetExpiryDate = signal(this.addBusinessDays(this.firstAvailableTradingDate(), 4));
-  protected readonly presetDateMin = this.firstAvailableTradingDate();
-  protected readonly presetDateMax = this.addBusinessDays(this.firstAvailableTradingDate(), 4);
+  protected get presetDateMin(): string { this.todayDate(); return this.firstAvailableTradingDate(); }
+  protected get presetDateMax(): string { return this.addBusinessDays(this.presetDateMin, 4); }
+  protected readonly calendarCoverageWarning = computed(() => !hasTradingCalendar(this.presetDateMin) || !hasTradingCalendar(this.presetDateMax));
   protected readonly presetOrders = signal<PresetOrder[]>([]);
   protected readonly closedTrades = signal<ClosedTrade[]>([]);
   protected readonly tradePositions = signal<TradePosition[]>([
@@ -488,7 +749,7 @@ export class App {
 
   protected readonly currentStockMarketProfit = computed(() =>
     this.currentStockPositions().reduce(
-      (total, position) => total + this.portfolioCalculator.positionProfit(position, this.valuationPrice(), this.feeDiscount()),
+      (total, position) => total + this.portfolioCalculator.positionProfit(position, this.valuationPrice(), this.feeDiscount(), this.calendarDaysBetween(position.tradeDate, this.todayDate()), this.financingRate(), this.shortBorrowRate()),
       0,
     ),
   );
@@ -496,13 +757,72 @@ export class App {
   protected readonly portfolioMarketValue = computed(() => this.tradePositions().reduce(
     (total, position) => total + this.portfolioCalculator.positionMarketValue(position, this.marketPriceForSymbol(position.symbol)), 0,
   ));
+  protected readonly portfolioExposure = computed(() => {
+    let long = 0, short = 0;
+    for (const position of this.tradePositions()) {
+      const notional = position.shares * this.marketPriceForSymbol(position.symbol);
+      if (position.type === '空單' || position.type === '融券') short += notional;
+      else long += notional;
+    }
+    return { long, short, gross: long + short, net: long - short, ratio: long > 0 ? short / long * 100 : null };
+  });
+  private readonly analysisHistory = signal<Record<string, StockHistoryPoint[]>>({});
+  protected readonly analysisLoading = signal(false);
+  protected readonly analysisStatus = signal('');
+  protected readonly dailyAnalysis = computed(() => [...new Set(this.tradePositions().map(position => position.symbol))].map(symbol => ({
+    symbol, ...compareDailyReturns(this.analysisHistory()[symbol] ?? [], this.analysisHistory()['0050'] ?? []),
+  })));
+  protected readonly pairwiseCorrelations = computed(() => {
+    const symbols = this.dailyAnalysis().map(row => row.symbol);
+    return symbols.flatMap((left, index) => symbols.slice(index + 1).map(right => ({ left, right,
+      ...compareDailyReturns(this.analysisHistory()[left] ?? [], this.analysisHistory()[right] ?? []),
+    })));
+  });
+  protected readonly betaExposure = computed(() => {
+    const rows = this.dailyAnalysis();
+    let value = 0;
+    const missing: string[] = [];
+    for (const row of rows) {
+      const price = this.latestPrices()[row.symbol] ?? (row.symbol === this.stockSymbol() ? this.latestPrice() : 0);
+      if (row.beta === null || !(price > 0)) { missing.push(row.symbol); continue; }
+      value += this.tradePositions().filter(position => position.symbol === row.symbol).reduce((sum, position) => sum + position.shares * price * (position.type === '空單' || position.type === '融券' ? -1 : 1) * row.beta!, 0);
+    }
+    return { value, missing };
+  });
+  protected loadDailyAnalysis(): void {
+    if (this.analysisLoading()) return;
+    const symbols = [...new Set(['0050', ...this.tradePositions().map(position => position.symbol)])];
+    if (symbols.length > 11) { this.analysisStatus.set('目前單次最多 10 檔持倉股票，避免過量請求。'); return; }
+    const date = this.todayInputValue();
+    this.analysisLoading.set(true);
+    this.analysisStatus.set('正在取得最多 120 交易日資料…');
+    forkJoin(symbols.map(symbol => this.stockPriceService.getHistory(symbol, 120, date))).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: histories => { this.analysisHistory.set(Object.fromEntries(symbols.map((symbol, i) => [symbol, histories[i]]))); this.analysisLoading.set(false); this.analysisStatus.set(`日行情取得日期 ${date}；需至少 30 組同起訖交易日報酬，資料不足或零變異不計算。`); },
+      error: () => { this.analysisLoading.set(false); this.analysisStatus.set('資料取得失敗，請稍後重試。'); },
+    });
+  }
+  protected readonly portfolioStress = computed(() => {
+    const symbols = [...new Set([...this.tradePositions().map(position => position.symbol), ...this.presetOrders().filter(order => !this.isPresetExpired(order)).map(order => order.symbol)])];
+    const priceFor = (symbol: string) => this.latestPrices()[symbol] ?? (symbol === this.stockSymbol() ? this.latestPrice() : 0);
+    const missing = symbols.filter(symbol => !(priceFor(symbol) > 0));
+    const scenarios = [
+      { name: '全部逐步下跌 10%', shock: -0.1, stops: true },
+      { name: '全部逐步上漲 10%', shock: 0.1, stops: true },
+      { name: '全部跳空下跌 10%', shock: -0.1, stops: false },
+      { name: '全部跳空上漲 10%', shock: 0.1, stops: false },
+    ].map((option, index) => {
+      const rows = symbols.filter(symbol => priceFor(symbol) > 0).map(symbol => ({ symbol, scenario: this.buildStockStressScenario(`portfolio-${index}-${symbol}`, option.name, '同幅度衝擊', option.shock, option.stops, symbol, priceFor(symbol)) }));
+      return { name: option.name, rows, total: rows.reduce((sum, row) => sum + row.scenario.totalProfit, 0), change: rows.reduce((sum, row) => sum + row.scenario.changeFromNow, 0), exposure: rows.reduce((sum, row) => sum + row.scenario.stressedExposure, 0) };
+    });
+    return { missing, scenarios, count: symbols.length - missing.length };
+  });
 
   protected readonly portfolioCost = computed(() => this.tradePositions().reduce(
     (total, position) => total + this.portfolioCalculator.positionCost(position), 0,
   ));
 
   protected readonly portfolioUnrealizedProfit = computed(() => this.tradePositions().reduce(
-    (total, position) => total + this.portfolioCalculator.positionProfit(position, this.marketPriceForSymbol(position.symbol), this.feeDiscount()), 0,
+    (total, position) => total + this.portfolioCalculator.positionProfit(position, this.marketPriceForSymbol(position.symbol), this.feeDiscount(), this.calendarDaysBetween(position.tradeDate, this.todayDate()), this.financingRate(), this.shortBorrowRate()), 0,
   ));
 
   protected readonly portfolioRealizedProfit = computed(() => this.closedTrades().reduce(
@@ -510,7 +830,7 @@ export class App {
   ));
 
   protected readonly pendingOrderCapital = computed(() => this.presetOrders().filter(order => !this.isPresetExpired(order)).reduce(
-    (total, order) => total + (order.action === 'sell' ? 0 : order.entryPrice * order.shares), 0,
+    (total, order) => total + (order.action === 'sell' ? 0 : this.portfolioCalculator.entryCapital(order.entryPrice, order.type, order.shares, this.feeDiscount())), 0,
   ));
 
   protected readonly cashAfterPendingOrders = computed(() => this.availableCash() - this.pendingOrderCapital());
@@ -528,31 +848,59 @@ export class App {
     const value = this.positionForm().stopLossPrice;
     return value && value > 0 ? value : undefined;
   });
+  protected readonly pricePlanningError = computed(() => {
+    const form = this.positionForm();
+    if (this.presetOrderAction() === 'sell') return '';
+    const short = form.type === '空單' || form.type === '融券';
+    if (form.stopLossPrice !== undefined && (short ? form.stopLossPrice <= form.entryPrice : form.stopLossPrice >= form.entryPrice))
+      return short ? '空單停損須高於進場價。' : '多單停損須低於進場價。';
+    if (form.targetPrice > 0 && (short ? form.targetPrice >= form.entryPrice : form.targetPrice <= form.entryPrice))
+      return short ? '空單獲利目標須低於進場價。' : '多單獲利目標須高於進場價。';
+    return '';
+  });
+  protected readonly riskPerShare = computed(() => {
+    const form = this.positionForm();
+    if (this.pricePlanningError() || this.proposedStopLoss() === undefined) return null;
+    return Math.max(0, -this.portfolioCalculator.simulateOrder(form.entryPrice, this.proposedStopLoss()!, form.type, 1,
+      this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount()));
+  });
   protected readonly suggestedRiskShares = computed(() => {
-    const stopLoss = this.proposedStopLoss();
-    return stopLoss === undefined ? 0 : this.portfolioCalculator.recommendedShares(
-      this.positionForm().entryPrice, stopLoss, this.maxRiskPerTrade(), this.feeDiscount(),
-    );
+    const risk = this.riskPerShare();
+    if (!risk || this.presetOrderAction() === 'sell') return 0;
+    const editing = this.presetOrders().find(order => order.id === this.editingPresetOrderId());
+    const credit = editing && editing.action !== 'sell' && !this.isPresetExpired(editing) ? this.portfolioCalculator.entryCapital(editing.entryPrice, editing.type, editing.shares, this.feeDiscount()) : 0;
+    const budget = Math.max(this.availableCash() - this.pendingOrderCapital() + credit, 0);
+    const form = this.positionForm();
+    const raw = this.portfolioCalculator.sizeByRiskAndCash(form.entryPrice, this.proposedStopLoss()!, form.type, this.maxRiskPerTrade(), budget, this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount());
+    return this.shareUnit() === 'boardLot' ? Math.floor(raw / 1000) * 1000 : Math.min(raw, 999);
   });
   protected readonly proposedOrderRisk = computed(() => {
     const stopLoss = this.proposedStopLoss();
-    return stopLoss === undefined ? 0 : Math.abs(this.portfolioCalculator.simulateOrder(
-      this.positionForm().entryPrice, stopLoss, this.positionForm().type, this.positionForm().shares, 1,
+    return stopLoss === undefined || this.pricePlanningError() ? null : Math.max(0, -this.portfolioCalculator.simulateOrder(
+      this.positionForm().entryPrice, stopLoss, this.positionForm().type, this.positionForm().shares, this.nearTermDays(),
       this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
     ));
   });
   protected readonly proposedOrderReward = computed(() => {
     const targetPrice = this.positionForm().targetPrice;
-    return targetPrice > 0 ? Math.max(this.portfolioCalculator.simulateOrder(
+    return targetPrice > 0 && !this.pricePlanningError() ? this.portfolioCalculator.simulateOrder(
       this.positionForm().entryPrice, targetPrice, this.positionForm().type, this.positionForm().shares,
       this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-    ), 0) : 0;
-  });  protected readonly proposedRiskRewardRatio = computed(() => this.proposedOrderRisk() > 0
-    ? this.proposedOrderReward() / this.proposedOrderRisk() : 0);
+    ) : null;
+  });  protected readonly proposedRiskRewardRatio = computed(() => {
+    const risk = this.proposedOrderRisk(), reward = this.proposedOrderReward();
+    return risk !== null && risk > 0 && reward !== null ? reward / risk : null;
+  });
 
   protected readonly backtestResult = computed<BacktestResult>(() => this.portfolioCalculator.backtest(
     this.history().map((point) => point.close), this.positionForm().type, 100_000,
   ));
+  protected readonly plannedTradeResult = computed(() => {
+    const form = this.positionForm();
+    return simulatePlannedTrade(this.history(), { entry: form.entryPrice, stop: form.stopLossPrice,
+      target: form.targetPrice > 0 ? form.targetPrice : undefined, shares: form.shares, type: form.type,
+      capital: this.availableCash(), feeDiscount: this.feeDiscount(), financingRate: this.financingRate(), borrowRate: this.shortBorrowRate() }, this.portfolioCalculator);
+  });
 
   protected readonly stressScenarios = computed<StressScenario[]>(() => {
     const directionalScenarios = [
@@ -591,7 +939,7 @@ export class App {
     const bySymbol = new Map<string, { symbol: string; profit: number; shares: number; positions: number }>();
 
     for (const position of this.tradePositions()) {
-      const profit = this.portfolioCalculator.positionProfit(position, this.marketPriceForSymbol(position.symbol), this.feeDiscount());
+      const profit = this.portfolioCalculator.positionProfit(position, this.marketPriceForSymbol(position.symbol), this.feeDiscount(), this.calendarDaysBetween(position.tradeDate, this.todayDate()), this.financingRate(), this.shortBorrowRate());
       const current = bySymbol.get(position.symbol) ?? {
         symbol: position.symbol,
         profit: 0,
@@ -627,6 +975,24 @@ export class App {
   );
 
   protected readonly canCreateSellPreset = computed(() => this.sellableFormStockShares() > 0);
+  protected readonly matchingSellHoldings = computed(() => this.sellableFormStockPositions()
+    .filter(position => position.type === this.positionForm().type).reduce((sum, position) => sum + position.shares, 0));
+  protected readonly reservedSellShares = computed(() => this.presetOrders()
+    .filter(order => order.action === 'sell' && order.symbol === this.positionForm().symbol.trim() && order.type === this.positionForm().type
+      && !this.isPresetExpired(order) && order.id !== this.editingPresetOrderId())
+    .reduce((sum, order) => sum + order.shares, 0));
+  protected readonly availableSellOrderShares = computed(() => Math.max(0, this.matchingSellHoldings() - this.reservedSellShares()));
+  protected readonly oversubscribedSellOrders = computed(() => {
+    const groups = new Map<string, { symbol: string; type: OrderType; reserved: number; held: number }>();
+    for (const order of this.presetOrders().filter(order => order.action === 'sell' && !this.isPresetExpired(order))) {
+      const key = `${order.symbol}:${order.type}`;
+      const group = groups.get(key) ?? { symbol: order.symbol, type: order.type, reserved: 0,
+        held: this.tradePositions().filter(position => position.symbol === order.symbol && position.type === order.type).reduce((sum, position) => sum + position.shares, 0) };
+      group.reserved += order.shares;
+      groups.set(key, group);
+    }
+    return [...groups.values()].filter(group => group.reserved > group.held);
+  });
 
   protected readonly visibleHoldingPositions = computed(() => this.holdingViewMode() === 'current'
     ? this.currentStockPositions() : this.tradePositions());
@@ -826,14 +1192,25 @@ export class App {
     effect(onCleanup => {
       const content = this.workspaceContent();
       const enabled = this.autoSaveEnabled();
-      if (!enabled || content === untracked(this.savedWorkspaceContent)) return;
+      if (!enabled || this.storageConflict() || content === untracked(this.savedWorkspaceContent)) return;
       const pendingSave = setTimeout(() => this.saveWorkspace(), 1000);
       onCleanup(() => clearTimeout(pendingSave));
     });
     this.loadCurrentPrice();
     timer(30000, 30000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.refreshCalendar();
       if (this.liveEnabled() && document.visibilityState === 'visible') this.refreshIntraday();
     });
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea === localStorage && (event.key === this.workspaceStorageKey || event.key === null) && localStorage.getItem(this.workspaceStorageKey) !== this.expectedStoredWorkspace) {
+        this.storageConflict.set(true);
+        this.autoSaveEnabled.set(false);
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') this.refreshCalendar(); };
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisible);
+    this.destroyRef.onDestroy(() => { window.removeEventListener('storage', onStorage); document.removeEventListener('visibilitychange', onVisible); });
   }
 
   protected toggleLive(): void {
@@ -869,6 +1246,9 @@ export class App {
       this.latestPrice.set(quote.close);
       this.quoteDate.set(date);
       this.quoteChange.set(quote.change);
+      this.quoteSource.set(quote.source ?? 'MIS');
+      this.quoteSourceTime.set(quote.quoteTime ?? '未提供');
+      this.quoteFetchedAt.set(this.formatSavedTime(new Date()));
       this.latestPrices.update(prices => ({ ...prices, [symbol]: quote.close }));
       this.liveStatus.set(`行情時間 ${date} ${quote.quoteTime || '未提供'}（台北）・30 秒輪詢，來源可能延遲`);
     });
@@ -878,7 +1258,14 @@ export class App {
     this.saveError.set('');
     try {
       if (typeof localStorage === 'undefined') throw new Error('Storage unavailable');
-      localStorage.setItem(this.workspaceStorageKey, this.workspaceBackupJson());
+      if (this.storageConflict() || localStorage.getItem(this.workspaceStorageKey) !== this.expectedStoredWorkspace) {
+        this.storageConflict.set(true);
+        this.autoSaveEnabled.set(false);
+        return;
+      }
+      const raw = this.workspaceBackupJson();
+      localStorage.setItem(this.workspaceStorageKey, raw);
+      this.expectedStoredWorkspace = raw;
       this.savedWorkspaceContent.set(this.workspaceContent());
       this.saveStatus.set(`已儲存 ${this.formatSavedTime(new Date())}（台北）`);
     } catch {
@@ -888,6 +1275,16 @@ export class App {
 
   private workspaceBackupJson(): string {
     return JSON.stringify({ version: 1, savedAt: new Date().toISOString(), ...JSON.parse(this.workspaceContent()) }, null, 2);
+  }
+  private tradeCostSnapshot(entry: number, exit: number, type: OrderType, shares: number, days: number, position?: TradePosition) {
+    return {
+      costBreakdown: position ? this.portfolioCalculator.positionExitCosts(position, exit, shares, days, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) : this.portfolioCalculator.tradeCosts(entry, exit, type, shares, days, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()),
+      costAssumptions: { ...this.costModel(), feeDiscount: this.feeDiscount(), financingRate: this.financingRate(), borrowRate: this.shortBorrowRate(), holdingDays: days, recordedAt: new Date().toISOString() },
+    };
+  }
+  private reducePositionShares(position: TradePosition, sold: number): TradePosition {
+    const fraction = position.shares > 0 ? (position.shares - sold) / position.shares : 0;
+    return { ...position, shares: position.shares - sold, entryFeePaid: position.entryFeePaid === undefined ? undefined : position.entryFeePaid * fraction, entryTaxPaid: position.entryTaxPaid === undefined ? undefined : position.entryTaxPaid * fraction };
   }
 
   private formatSavedTime(date: Date): string {
@@ -917,6 +1314,11 @@ export class App {
   }
 
   protected loadCurrentPrice(): void {
+    this.quoteFetchedAt.set('');
+    this.quoteSource.set('');
+    this.quoteSourceTime.set('');
+    this.latestPrice.set(this.latestPrices()[this.stockSymbol()] ?? 0);
+    this.quoteDate.set(this.stockRecords().find(record => record.symbol === this.stockSymbol())?.quoteDate ?? '');
     const quoteRequestId = ++this.quoteRequestId;
     ++this.historyRequestId;
     this.historyLoading.set(false);
@@ -948,6 +1350,9 @@ export class App {
 
         this.quoteDate.set(quote.date);
         this.quoteChange.set(quote.change);
+        this.quoteSource.set(quote.source ?? '未提供');
+        this.quoteSourceTime.set(quote.quoteTime ?? '日行情無盤中時間');
+        this.quoteFetchedAt.set(this.formatSavedTime(new Date()));
         this.latestPrice.set(quote.close);
         this.latestPrices.update((prices) => ({ ...prices, [requestedSymbol]: quote.close }));
         this.upsertStockRecord(requestedSymbol, quote.name || requestedSymbol, quote.close, quote.change, quote.date);
@@ -962,7 +1367,7 @@ export class App {
         this.stockName.set(quote.name || requestedSymbol);
         this.quoteError.set('');
 
-        if (this.stockSymbol() === requestedSymbol && !this.editingPositionId()) {
+        if (this.stockSymbol() === requestedSymbol && !this.editingPositionId() && !this.editingPresetOrderId()) {
           this.syncOrderFormToStock(requestedSymbol, quote.close);
         }
 
@@ -1185,24 +1590,39 @@ export class App {
   }
 
   protected applySuggestedShares(): void {
+    if (this.suggestedRiskShares() <= 0) { this.orderStatus.set('風險或資金預算不足目前交易單位，請切換零股或調整規劃。'); return; }
     const rawShares = this.suggestedRiskShares();
     const shares = this.shareUnit() === 'boardLot'
       ? Math.floor(rawShares / 1000) * 1000
       : Math.min(rawShares, 999);
-    this.positionForm.update((form) => ({ ...form, shares: Math.max(shares, this.shareUnit() === 'boardLot' ? 1000 : 1) }));
+    this.positionForm.update((form) => ({ ...form, shares }));
   }
 
   protected closeTradePosition(position: TradePosition): void {
-    const exitPrice = this.marketPriceForSymbol(position.symbol);
-    const holdingDays = this.calendarDaysBetween(position.tradeDate, this.todayInputValue());
-    const realizedProfit = this.portfolioCalculator.simulateOrder(
-      position.entryPrice, exitPrice, position.type, position.shares, holdingDays,
-      this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-    );
+    this.closingPositionId.set(position.id);
+    this.closingPrice.set(this.latestPrices()[position.symbol] ?? (position.symbol === this.stockSymbol() ? this.latestPrice() : 0));
+    this.closingShares.set(position.shares);
+    this.closingDate.set(this.todayInputValue());
+    this.closingStatus.set('');
+  }
+
+  protected confirmPositionClose(): void {
+    const position = this.closingPosition(), preview = this.closingPreview();
+    if (!position || !preview) return;
+    const shares = this.closingShares();
+    const isShort = this.closingIsShort();
+    const undoBefore = this.tradeStateJson();
     this.closedTrades.update((trades) => [...trades, {
-      ...position, exitPrice, exitDate: this.todayInputValue(), realizedProfit,
+      ...position, id: `close-${crypto.randomUUID()}`, shares, exitPrice: this.closingPrice(), exitDate: this.closingDate(), realizedProfit: preview.net,
+      ...this.tradeCostSnapshot(position.entryPrice, this.closingPrice(), position.type, shares, this.calendarDaysBetween(position.tradeDate, this.closingDate()), position),
     }]);
-    this.removeTradePosition(position.id);
+    this.tradePositions.update(items => items.flatMap(item => item.id !== position.id ? [item] : preview.remaining > 0 ? [this.reducePositionShares(item, shares)] : []));
+    this.recordCashTrade(`cash-${crypto.randomUUID()}`, this.closingDate(), this.closingPrice(), shares, true, position.type);
+    this.lastTradeUndo.set({ before: undoBefore, after: this.tradeStateJson(), description: `${position.symbol} ${isShort ? '回補' : '平倉'} ${shares} 股` });
+    this.confirmUndoTrade.set(false);
+    this.undoTradeStatus.set('');
+    this.closingStatus.set(`已記錄 ${position.symbol} ${isShort ? '回補' : '平倉'} ${shares} 股，剩餘 ${preview.remaining} 股。`);
+    this.closingPositionId.set(null);
   }
 
   protected deletePositionGroup(symbol: string): void {
@@ -1357,7 +1777,7 @@ export class App {
   }
 
   protected createPresetOrderFromForm(): void {
-    if (this.orderFormError()) return;
+    if (this.orderFormError() || this.pricePlanningError()) return;
     const form = this.positionForm();
     const symbol = form.symbol.trim();
     if (!symbol) return;
@@ -1404,6 +1824,8 @@ export class App {
   }
 
   protected removePresetOrder(id: string): void {
+    const order = this.presetOrders().find(item => item.id === id);
+    if (order) this.archivedPresetOrders.update(items => [...items, { ...order, finalStatus: '取消', finalizedAt: new Date().toISOString() }]);
     this.pendingPresetCancel.set(null);
     this.presetOrders.update((orders) => orders.filter((order) => order.id !== id));
     if (this.editingPresetOrderId() === id) this.editingPresetOrderId.set(null);
@@ -1477,15 +1899,28 @@ export class App {
   }
 
   private marketPriceForSymbol(symbol: string): number {
-    return this.latestPrices()[symbol] ?? (symbol === this.stockSymbol() ? this.valuationPrice() : this.selectedPrice());
+    const cached = this.latestPrices()[symbol];
+    if (cached > 0) return cached;
+    if (symbol === this.stockSymbol() && this.latestPrice() > 0) return this.latestPrice();
+    const positions = this.tradePositions().filter(position => position.symbol === symbol);
+    const shares = positions.reduce((sum, position) => sum + position.shares, 0);
+    return shares > 0 ? positions.reduce((sum, position) => sum + position.entryPrice * position.shares, 0) / shares : 0;
   }
 
   private restoreWorkspace(): void {
     if (typeof localStorage === 'undefined') return;
     try {
       const raw = localStorage.getItem(this.workspaceStorageKey);
+      this.expectedStoredWorkspace = raw;
       if (!raw) return;
-      const saved = JSON.parse(raw) as Record<string, unknown>;
+      const saved = validateWorkspaceBackup(raw);
+      this.cashMovements.set(saved['cashMovements'] ?? []);
+      this.cashOpeningBalance.set(saved['cashOpeningBalance'] ?? 0);
+      this.cashTrackingEnabled.set(saved['cashTrackingEnabled'] ?? false);
+      const costs = saved['costModel'] as { feeRate: number; minimumFee: number; taxRate: number; financingLoanRatio: number } | undefined;
+      this.portfolioCalculator.costSettings.set(costs ?? { feeRate: .001425, minimumFee: 0, taxRate: .003, financingLoanRatio: .4 });
+      this.stockIndustries.set(saved['stockIndustries'] && typeof saved['stockIndustries'] === 'object' ? saved['stockIndustries'] as Record<string, string> : {});
+      this.priceAlerts.set(saved['priceAlerts'] && typeof saved['priceAlerts'] === 'object' ? saved['priceAlerts'] as Record<string, { lower?: number; upper?: number }> : {});
       const indicators = saved['chartIndicators'] as Record<string, unknown> | undefined;
       if (indicators && typeof indicators === 'object') this.chartIndicators.update(defaults => ({
         obv: typeof indicators['obv'] === 'boolean' ? indicators['obv'] : defaults.obv,
@@ -1497,6 +1932,7 @@ export class App {
       if (Array.isArray(saved['presetOrders'])) this.presetOrders.set(saved['presetOrders'] as PresetOrder[]);
       if (Array.isArray(saved['closedTrades'])) this.closedTrades.set(saved['closedTrades'] as ClosedTrade[]);
       if (Array.isArray(saved['presetFills'])) this.presetFills.set(saved['presetFills'] as PresetFill[]);
+      this.archivedPresetOrders.set(Array.isArray(saved['archivedPresetOrders']) ? saved['archivedPresetOrders'] as Array<PresetOrder & { finalStatus: '已成交' | '取消'; finalizedAt: string }> : []);
       if (saved['latestPrices'] && typeof saved['latestPrices'] === 'object') this.latestPrices.set(saved['latestPrices'] as Record<string, number>);
       if (typeof saved['availableCash'] === 'number') this.availableCash.set(saved['availableCash']);
       if (typeof saved['maxRiskPerTrade'] === 'number') this.maxRiskPerTrade.set(saved['maxRiskPerTrade']);
@@ -1528,7 +1964,7 @@ export class App {
   private syncOrderFormToStock(symbol: string, marketPrice: number): void {
     const price = Math.max(marketPrice, 1);
     const existingTargets = this.tradePositions()
-      .filter((position) => position.symbol === symbol && position.targetPrice > 0)
+      .filter((position) => position.symbol === symbol && position.targetPrice > price && (position.type === '現股多單' || position.type === '融資'))
       .map((position) => position.targetPrice);
     const targetPrice = existingTargets.length
       ? existingTargets.reduce((sum, target) => sum + target, 0) / existingTargets.length
@@ -1596,7 +2032,7 @@ export class App {
 
   private firstAvailableTradingDate(): string {
     const date = new Date(`${this.todayInputValue()}T00:00:00`);
-    while (date.getDay() === 0 || date.getDay() === 6) date.setDate(date.getDate() + 1);
+    while (!isTradingDate(this.toInputDate(date))) date.setDate(date.getDate() + 1);
     return this.toInputDate(date);
   }
 
@@ -1617,7 +2053,7 @@ export class App {
     let remaining = days;
     while (remaining > 0) {
       date.setDate(date.getDate() + 1);
-      if (date.getDay() !== 0 && date.getDay() !== 6) remaining--;
+      if (isTradingDate(this.toInputDate(date))) remaining--;
     }
     return this.toInputDate(date);
   }
@@ -1625,7 +2061,7 @@ export class App {
   private clampPresetDate(value: string): string {
     const candidate = value >= this.presetDateMin && value <= this.presetDateMax ? value : this.presetDateMin;
     const date = new Date(`${candidate}T00:00:00`);
-    return date.getDay() === 0 || date.getDay() === 6 ? this.addBusinessDays(candidate, 1) : candidate;
+    return !isTradingDate(this.toInputDate(date)) ? this.addBusinessDays(candidate, 1) : candidate;
   }
 
   private businessDaysThrough(value: string): number {
@@ -1633,7 +2069,7 @@ export class App {
     const end = new Date(`${value}T00:00:00`);
     let days = 0;
     while (date <= end) {
-      if (date.getDay() !== 0 && date.getDay() !== 6) days++;
+      if (isTradingDate(this.toInputDate(date))) days++;
       date.setDate(date.getDate() + 1);
     }
     return Math.max(days, 1);
@@ -1665,58 +2101,82 @@ export class App {
     }
     return profit;
   }
-  private buildStockStressScenario(id: string, name: string, assumption: string, shock: number, respectStops: boolean): StressScenario {
-    const scenarioPrice = this.valuationPrice() * (1 + shock);
-    const positions = this.currentStockPositions();
+  private buildStockStressScenario(id: string, name: string, assumption: string, shock: number, respectStops: boolean, symbol = this.stockSymbol(), marketPrice = this.valuationPrice()): StressScenario {
+    const details: StressScenario['details'] = [];
+    const scenarioPrice = marketPrice * (1 + shock);
+    const positions = this.tradePositions().filter(position => position.symbol === symbol);
     const stressProfitForPosition = (position: TradePosition, shares: number) => {
       const configuredTarget = position.targetPrice > 0 && position.targetPrice !== position.entryPrice
         ? position.targetPrice : undefined;
-      return this.portfolioCalculator.simulateOrder(
-        position.entryPrice,
+      return this.portfolioCalculator.positionProfit(
+        position,
         this.scenarioExitPrice(scenarioPrice, position.type, position.stopLossPrice, configuredTarget, respectStops),
-        position.type, shares,
+        this.feeDiscount(),
         this.calendarDaysBetween(position.tradeDate, this.todayInputValue()),
-        this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+        this.financingRate(), this.shortBorrowRate(), shares,
       );
     };
     const holdingProfit = positions.reduce((total, position) => total + stressProfitForPosition(position, position.shares), 0);
-    const remainingShares = new Map(positions.map((position) => [position.id, position.shares]));
-    let stressedShares = positions.reduce((total, position) => total + position.shares, 0);
-    const presetProfit = this.currentStockPresetOrders().filter(order => !this.isPresetExpired(order)).reduce((total, order) => {
+    for (const position of positions) {
+      const target = position.targetPrice !== position.entryPrice ? position.targetPrice : undefined;
+      const exit = this.scenarioExitPrice(scenarioPrice, position.type, position.stopLossPrice, target, respectStops);
+      const days = this.calendarDaysBetween(position.tradeDate, this.todayInputValue());
+      details.push({ label: `持倉 ${position.id} · ${position.type}`, shares: position.shares, entry: position.entryPrice, exit,
+        reason: !respectStops ? '跳空：按情境價估值，不假設中間價成交' : exit !== scenarioPrice ? (exit === position.stopLossPrice ? '觸發停損' : '觸發目標') : '按情境價估值',
+        costs: this.portfolioCalculator.positionExitCosts(position, exit, position.shares, days, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
+        contribution: stressProfitForPosition(position, position.shares) });
+    }
+    const remainingShares = new Map(positions.map(position => [position.id,
+      this.scenarioTriggersExit(scenarioPrice, position.type, position.stopLossPrice, position.targetPrice !== position.entryPrice ? position.targetPrice : undefined, respectStops) ? 0 : position.shares]));
+    let stressedShares = [...remainingShares.values()].reduce((sum, shares) => sum + shares, 0);
+    const presetProfit = this.presetOrders().filter(order => order.symbol === symbol && !this.isPresetExpired(order)).reduce((total, order) => {
       if (order.action === 'sell') {
         if (scenarioPrice < order.entryPrice) return total;
         let sharesToSell = order.shares;
         let adjustment = 0;
         for (const position of positions) {
           if (sharesToSell <= 0) break;
-          if (position.type !== '現股多單' && position.type !== '融資') continue;
+          if (position.type !== order.type || (position.type !== '現股多單' && position.type !== '融資')) continue;
           const availableShares = remainingShares.get(position.id) ?? 0;
           const soldShares = Math.min(availableShares, sharesToSell);
           if (soldShares <= 0) continue;
           const holdingDays = this.calendarDaysBetween(position.tradeDate, this.todayInputValue());
-          const realizedProfit = this.portfolioCalculator.simulateOrder(
-            position.entryPrice, order.entryPrice, position.type, soldShares, holdingDays,
-            this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+          const realizedProfit = this.portfolioCalculator.positionProfit(
+            position, order.entryPrice, this.feeDiscount(), holdingDays,
+            this.financingRate(), this.shortBorrowRate(), soldShares,
           );
           adjustment += realizedProfit - stressProfitForPosition(position, soldShares);
+          details.push({ label: `賣出預設單 ${order.id} → ${position.id}`, shares: soldShares, entry: position.entryPrice, exit: order.entryPrice,
+            reason: '以委託價賣出：此列為替換上述持倉估值的損益差額，勿重複加總完整損益',
+            costs: this.portfolioCalculator.positionExitCosts(position, order.entryPrice, soldShares, holdingDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
+            contribution: realizedProfit - stressProfitForPosition(position, soldShares) });
           remainingShares.set(position.id, availableShares - soldShares);
           sharesToSell -= soldShares;
           stressedShares -= soldShares;
         }
         return total + adjustment;
       }
-      stressedShares += order.shares;
+      const remaining = this.scenarioTriggersExit(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops) ? 0 : order.shares;
+      stressedShares += remaining;
+      const exit = this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops);
+      details.push({ label: `進場預設單 ${order.id} · ${order.type}`, shares: order.shares, entry: order.entryPrice, exit, remaining,
+        reason: '假設全部進場；' + (!respectStops ? '跳空按情境價估值' : exit !== scenarioPrice ? (exit === order.stopLossPrice ? '觸發停損' : '觸發目標') : '按情境價估值'),
+        costs: this.portfolioCalculator.tradeCosts(order.entryPrice, exit, order.type, order.shares, order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
+        contribution: this.portfolioCalculator.simulateOrder(order.entryPrice, exit, order.type, order.shares, order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) });
       return total + this.portfolioCalculator.simulateOrder(
         order.entryPrice, this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops), order.type, order.shares, order.validDays,
         this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
       );
     }, 0);
     const totalProfit = holdingProfit + presetProfit;
+    positions.forEach((position, index) => { details[index].remaining = remainingShares.get(position.id) ?? 0; });
     const stressedExposure = scenarioPrice * stressedShares;
     const criticalLoss = Math.max(this.maxRiskPerTrade() * 2, 20_000);
     const severity: StressScenario['severity'] = totalProfit < -criticalLoss
       ? 'critical' : totalProfit < 0 ? 'warning' : 'normal';
-    return { id, name, assumption, scenarioPrice, holdingProfit, presetProfit, totalProfit, stressedExposure, severity };
+    const baseline = positions.reduce((sum, position) => sum + this.portfolioCalculator.positionProfit(position, marketPrice, this.feeDiscount(),
+      this.calendarDaysBetween(position.tradeDate, this.todayDate()), this.financingRate(), this.shortBorrowRate()), 0);
+    return { id, name, assumption, scenarioPrice, holdingProfit, presetProfit, totalProfit, stressedExposure, severity, details, changeFromNow: totalProfit - baseline };
   }
 
   private scenarioExitPrice(
@@ -1730,6 +2190,12 @@ export class App {
     if (!isShort && targetPrice && scenarioPrice >= targetPrice) return targetPrice;
     if (isShort && targetPrice && scenarioPrice <= targetPrice) return targetPrice;
     return scenarioPrice;
+  }
+
+  private scenarioTriggersExit(price: number, type: OrderType, stop: number | undefined, target: number | undefined, enabled: boolean): boolean {
+    if (!enabled) return false;
+    const short = type === '空單' || type === '融券';
+    return !!((stop && (short ? price >= stop : price <= stop)) || (target && (short ? price <= target : price >= target)));
   }
 
   private formatBoardDate(timestamp: number): string {

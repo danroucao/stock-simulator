@@ -48,6 +48,7 @@ export interface StockQuote {
   turnover: number;
   volume: number;
   quoteTime?: string;
+  source?: 'MIS' | 'TWSE' | 'FinMind';
 }
 
 export interface StockHistoryPoint extends StockQuote {}
@@ -142,6 +143,7 @@ export class StockPriceService {
             change: row.spread,
             turnover: row.Trading_money,
             volume: row.Trading_Volume,
+            source: 'FinMind' as const,
           };
         })
         .sort((left, right) => this.dateKey(left.date) - this.dateKey(right.date))
@@ -170,6 +172,7 @@ export class StockPriceService {
           turnover: 0,
           volume: this.toNumber(row.v ?? '0') * 1000,
           quoteTime: row.t,
+          source: 'MIS' as const,
         };
       }),
       catchError(() => of(null)),
@@ -246,6 +249,7 @@ export class StockPriceService {
       change: this.toNumber(change),
       turnover: this.toNumber(turnover),
       volume: this.toNumber(volume),
+      source: 'TWSE',
     };
   }
 

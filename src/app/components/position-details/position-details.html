@@ -46,7 +46,7 @@
                   <button type="button" class="delete-position-button" (click)="cancelPositionDelete()">取消</button>
                 } @else {
                   <button type="button" class="delete-position-button" (click)="requestPositionDelete(position.id)">刪除單筆記錄</button>
-                  <button type="button" class="close-position-button" (click)="positionClose.emit(position)">以目前市價平倉</button>
+                  <button type="button" class="close-position-button" (click)="positionClose.emit(position)">{{ position.type === '空單' || position.type === '融券' ? '記錄回補' : '記錄平倉' }}</button>
                 }
               </td></tr>
             }

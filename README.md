@@ -84,3 +84,15 @@ TradePosition[] → PortfolioCalculatorService → 分組／成本／市值／�
 ## 後續擴充原則
 
 新增獨立畫面區塊時，優先建立於 `components/`；共用資料結構放入 `models/`；不依賴畫面的計算或 API 存取放入 `services/`。只有跨區塊的頁面狀態保留在 `App`。
+
+## 本機瀏覽器整合驗證
+
+先在另一個終端執行 `npm start`（http://localhost:4200），再執行：
+
+```powershell
+npm.cmd run verify:trading
+npm.cmd run verify:tabs
+npm.cmd run verify:ui
+```
+
+交易與分頁驗證使用隔離瀏覽器及固定測試行情，不操作正式站帳務。交易驗證涵蓋部分成交、費稅流水、部分平倉、JSON 還原與 XLSX 內容；分頁驗證確認儲存衝突不覆蓋另一份資料。版面驗證檢查 1280px／390px 無橫向溢出。下載檔與截圖存於忽略版控的 `tmp/`。這些檢查需要本機 Playwright Chromium。

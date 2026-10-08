@@ -1,9 +1,10 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 
 import { BacktestResult, OrderScenario, OrderType, PositionGroup, TradeCostBreakdown, TradePosition } from '../models/trade-position.model';
 
 @Injectable({ providedIn: 'root' })
 export class PortfolioCalculatorService {
+  readonly costSettings = signal({ feeRate: 0.001425, minimumFee: 0, taxRate: 0.003, financingLoanRatio: 0.4 });
   simulateOrder(
     entry: number,
     exit: number,
@@ -25,11 +26,13 @@ export class PortfolioCalculatorService {
   ): TradeCostBreakdown {
     const entryTurnover = Math.max(entry * shares, 0);
     const exitTurnover = Math.max(exit * shares, 0);
-    const buyFee = entryTurnover * 0.001425 * feeDiscount;
-    const sellFee = exitTurnover * 0.001425 * feeDiscount;
-    const transactionTax = (this.isShort(type) ? entryTurnover : exitTurnover) * 0.003;
+    const settings = this.costSettings();
+    const fee = (turnover: number) => shares > 0 ? Math.max(turnover * settings.feeRate * feeDiscount, settings.minimumFee) : 0;
+    const buyFee = fee(this.isShort(type) ? exitTurnover : entryTurnover);
+    const sellFee = fee(this.isShort(type) ? entryTurnover : exitTurnover);
+    const transactionTax = (this.isShort(type) ? entryTurnover : exitTurnover) * settings.taxRate;
     const financingCost = type === '融資'
-      ? entryTurnover * 0.4 * (financingRate / 100) * (holdingDays / 365) : 0;
+      ? entryTurnover * settings.financingLoanRatio * (financingRate / 100) * (holdingDays / 365) : 0;
     const borrowCost = type === '融券'
       ? entryTurnover * (shortBorrowRate / 100) * (holdingDays / 365) : 0;
     return {
@@ -41,6 +44,35 @@ export class PortfolioCalculatorService {
   recommendedShares(entry: number, stopLoss: number, maxLoss: number, feeDiscount = 1): number {
     const riskPerShare = Math.abs(entry - stopLoss) + (entry + stopLoss) * 0.001425 * feeDiscount + stopLoss * 0.003;
     return riskPerShare > 0 ? Math.max(Math.floor(maxLoss / riskPerShare), 0) : 0;
+  }
+  positionExitCosts(position: TradePosition, exit: number, shares: number, days: number, financingRate: number, borrowRate: number, discount: number): TradeCostBreakdown {
+    const costs = this.tradeCosts(position.entryPrice, exit, position.type, shares, days, financingRate, borrowRate, discount);
+    const fraction = shares / position.shares;
+    if (position.entryFeePaid !== undefined) {
+      if (this.isShort(position.type)) costs.sellFee = position.entryFeePaid * fraction;
+      else costs.buyFee = position.entryFeePaid * fraction;
+    }
+    if (this.isShort(position.type) && position.entryTaxPaid !== undefined) costs.transactionTax = position.entryTaxPaid * fraction;
+    costs.total = costs.buyFee + costs.sellFee + costs.transactionTax + costs.financingCost + costs.borrowCost;
+    return costs;
+  }
+  entryCapital(entry: number, type: OrderType, shares: number, discount: number): number {
+    const costs = this.tradeCosts(entry, entry, type, shares, 1, 0, 0, discount);
+    return entry * shares + (this.isShort(type) ? costs.sellFee + costs.transactionTax : costs.buyFee);
+  }
+
+  sizeByRiskAndCash(entry: number, stop: number, type: OrderType, maxLoss: number, cash: number, days: number, financingRate: number, borrowRate: number, discount: number): number {
+    if (!(entry > 0) || !(stop > 0) || !(cash > 0) || !(maxLoss > 0)) return 0;
+    let low = 0, high = Math.min(Math.floor(cash / entry), 1_000_000_000);
+    while (low < high) {
+      const shares = Math.ceil((low + high) / 2);
+      const costs = this.tradeCosts(entry, stop, type, shares, days, financingRate, borrowRate, discount);
+      const entryCosts = this.isShort(type) ? costs.sellFee + costs.transactionTax : costs.buyFee;
+      const loss = -this.simulateOrder(entry, stop, type, shares, days, financingRate, borrowRate, discount);
+      if (loss <= maxLoss && entry * shares + entryCosts <= cash) low = shares;
+      else high = shares - 1;
+    }
+    return low;
   }
 
   backtest(prices: number[], type: OrderType, initialCapital = 100000): BacktestResult {
@@ -112,11 +144,17 @@ export class PortfolioCalculatorService {
     return currentPrice * position.shares;
   }
 
-  positionProfit(position: TradePosition, currentPrice: number, feeDiscount = 1): number {
-    return this.simulateOrder(position.entryPrice, currentPrice, position.type, position.shares, 1, 0, 0, feeDiscount);
+  holdingDays(start: string | undefined, end: string): number {
+    if (!start) return 1;
+    return Math.max(1, Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000));
+  }
+  positionProfit(position: TradePosition, currentPrice: number, feeDiscount = 1, days = 1, financingRate = 0, borrowRate = 0, shares = position.shares): number {
+    const costs = this.positionExitCosts(position, currentPrice, shares, days, financingRate, borrowRate, feeDiscount);
+    const gross = (this.isShort(position.type) ? position.entryPrice - currentPrice : currentPrice - position.entryPrice) * shares;
+    return gross - costs.total;
   }
 
-  groupPositions(positions: TradePosition[], marketPrice: (symbol: string) => number, feeDiscount = 1): PositionGroup[] {
+  groupPositions(positions: TradePosition[], marketPrice: (symbol: string) => number, feeDiscount = 1, asOfDate?: string, financingRate = 0, borrowRate = 0): PositionGroup[] {
     const groups = new Map<string, TradePosition[]>();
     for (const position of positions) {
       groups.set(position.symbol, [...(groups.get(position.symbol) ?? []), position]);
@@ -128,7 +166,7 @@ export class PortfolioCalculatorService {
       shares: groupedPositions.reduce((sum, position) => sum + position.shares, 0),
       cost: groupedPositions.reduce((sum, position) => sum + this.positionCost(position), 0),
       profit: groupedPositions.reduce(
-        (sum, position) => sum + this.positionProfit(position, marketPrice(symbol), feeDiscount),
+        (sum, position) => sum + this.positionProfit(position, marketPrice(symbol), feeDiscount, asOfDate ? this.holdingDays(position.tradeDate, asOfDate) : 1, financingRate, borrowRate),
         0,
       ),
     }));

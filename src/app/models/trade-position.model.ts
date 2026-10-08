@@ -1,6 +1,8 @@
 export type OrderType = '現股多單' | '空單' | '融資' | '融券';
 
 export interface TradePosition {
+  entryFeePaid?: number;
+  entryTaxPaid?: number;
   id: string;
   symbol: string;
   type: OrderType;
@@ -62,6 +64,8 @@ export interface PresetOrder {
 }
 
 export interface ClosedTrade extends TradePosition {
+  costBreakdown?: TradeCostBreakdown;
+  costAssumptions?: { feeRate: number; minimumFee: number; taxRate: number; financingLoanRatio: number; feeDiscount: number; financingRate: number; borrowRate: number; holdingDays: number; recordedAt: string };
   exitPrice: number;
   exitDate: string;
   realizedProfit: number;

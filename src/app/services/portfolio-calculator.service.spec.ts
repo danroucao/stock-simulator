@@ -4,6 +4,35 @@ import { TradePosition } from '../models/trade-position.model';
 import { PortfolioCalculatorService } from './portfolio-calculator.service';
 
 describe('PortfolioCalculatorService', () => {
+  it('uses remaining allocated entry cost for unrealized profit and grouped totals', () => {
+    const calculator = new PortfolioCalculatorService();
+    calculator.costSettings.update(settings => ({ ...settings, minimumFee: 20 }));
+    const position: TradePosition = { id: 'remaining', symbol: '2330', type: '現股多單', shares: 60, entryPrice: 10, targetPrice: 11, note: '', entryFeePaid: 12 };
+    const profit = calculator.positionProfit(position, 11);
+    expect(profit).toBeCloseTo(60 - 12 - 20 - 660 * .003);
+    expect(calculator.groupPositions([position], () => 11)[0].profit).toBe(profit);
+  });
+  it('allocates an existing entry fee across partial closes instead of charging a new minimum each time', () => {
+    const calculator = new PortfolioCalculatorService();
+    calculator.costSettings.update(settings => ({ ...settings, minimumFee: 20 }));
+    const position: TradePosition = { id: 'allocated', symbol: '2330', type: '現股多單', shares: 100, entryPrice: 10, targetPrice: 11, note: '', entryFeePaid: 20, entryTaxPaid: 0 };
+    const first = calculator.positionExitCosts(position, 11, 40, 1, 0, 0, 1);
+    expect(first.buyFee).toBe(8);
+    expect(first.sellFee).toBe(20);
+    const remaining = { ...position, shares: 60, entryFeePaid: 12 };
+    const second = calculator.positionExitCosts(remaining, 11, 60, 1, 0, 0, 1);
+    expect(first.buyFee + second.buyFee).toBe(20);
+    expect(second.sellFee).toBe(20);
+  });
+  it('applies minimum fees and sizes within both loss and cash budgets', () => {
+    const calculator = new PortfolioCalculatorService();
+    calculator.costSettings.update(settings => ({ ...settings, minimumFee: 20 }));
+    expect(calculator.tradeCosts(100, 95, '現股多單', 1).buyFee).toBe(20);
+    const shares = calculator.sizeByRiskAndCash(100, 95, '現股多單', 100, 10000, 1, 0, 0, 1);
+    expect(-calculator.simulateOrder(100, 95, '現股多單', shares)).toBeLessThanOrEqual(100);
+    expect(-calculator.simulateOrder(100, 95, '現股多單', shares + 1)).toBeGreaterThan(100);
+    expect(calculator.sizeByRiskAndCash(100, 95, '現股多單', 1000, 119, 1, 0, 0, 1)).toBe(0);
+  });
   let service: PortfolioCalculatorService;
   const longPosition: TradePosition = {
     id: 'long', symbol: '2330', type: '現股多單', shares: 100,

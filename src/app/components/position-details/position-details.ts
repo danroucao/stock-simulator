@@ -17,6 +17,9 @@ export class PositionDetails {
   readonly fallbackPrice = input.required<number>();
   readonly pricesBySymbol = input<Record<string, number>>({});
   readonly feeDiscount = input(1);
+  readonly asOfDate = input(new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date()));
+  readonly financingRate = input(0);
+  readonly borrowRate = input(0);
   readonly positionChange = output<PositionInlineChange>();
   readonly positionClose = output<TradePosition>();
   readonly positionDelete = output<string>();
@@ -26,7 +29,7 @@ export class PositionDetails {
   protected readonly pendingDeleteSymbol = signal<string | null>(null);
   protected readonly pendingDeletePositionId = signal<string | null>(null);
   protected readonly groups = computed(() =>
-    this.calculator.groupPositions(this.positions(), (symbol) => this.marketPriceFor(symbol), this.feeDiscount()),
+    this.calculator.groupPositions(this.positions(), (symbol) => this.marketPriceFor(symbol), this.feeDiscount(), this.asOfDate(), this.financingRate(), this.borrowRate()),
   );
 
   constructor(private readonly calculator: PortfolioCalculatorService) {
@@ -75,7 +78,10 @@ export class PositionDetails {
   protected marketPriceFor(symbol: string): number {
     const recordedPrice = this.pricesBySymbol()[symbol];
     if (recordedPrice > 0) return recordedPrice;
-    return symbol === this.currentSymbol() && this.latestPrice() > 0 ? this.latestPrice() : this.fallbackPrice();
+    if (symbol === this.currentSymbol() && this.latestPrice() > 0) return this.latestPrice();
+    const positions = this.positions().filter(position => position.symbol === symbol);
+    const shares = positions.reduce((sum, position) => sum + position.shares, 0);
+    return shares > 0 ? positions.reduce((sum, position) => sum + position.entryPrice * position.shares, 0) / shares : 0;
   }
 
   protected cost(position: TradePosition): number {
@@ -87,6 +93,6 @@ export class PositionDetails {
   }
 
   protected profit(position: TradePosition): number {
-    return this.calculator.positionProfit(position, this.marketPriceFor(position.symbol), this.feeDiscount());
+    return this.calculator.positionProfit(position, this.marketPriceFor(position.symbol), this.feeDiscount(), this.calculator.holdingDays(position.tradeDate, this.asOfDate()), this.financingRate(), this.borrowRate());
   }
 }

@@ -1,4 +1,9 @@
-<main class="dashboard">
+﻿<main class="dashboard">
+  <nav class="planning-summary" aria-label="固定規劃摘要">
+    <span>{{ stockSymbol() }} · 規劃資金 {{ availableCash() | number:'1.0-0' }}</span><span>淨曝險 {{ portfolioExposure().net | number:'1.0-0' }}</span>
+    <span>{{ oversubscribedSellOrders().length ? '出場委託超量' : estimatedPriceSymbols().length ? '部分行情缺漏' : hasSamplePositions() ? '含範例資料' : '交易規劃模式' }}</span>
+    <a href="#market-chart">行情</a><a href="#strategy-board">交易規劃</a><a href="#holdings-center">持倉</a><a href="#fill-history-title">紀錄</a><a href="#workspace-settings" (click)="openWorkspaceSettings()">設定</a>
+  </nav>
   <section class="hero-card">
     <div class="hero-copy">
       <span class="eyebrow">股票下單模擬器</span>
@@ -36,11 +41,26 @@
         <label><input type="checkbox" [checked]="autoSaveEnabled()" (change)="autoSaveEnabled.set($any($event.target).checked)" /> 自動儲存</label>
         <button type="button" class="save-workspace-button" (click)="saveWorkspace()">立即儲存</button>
         <button type="button" class="save-workspace-button" (click)="downloadWorkspaceBackup()">下載資料備份</button>
+        <button type="button" class="save-workspace-button" (click)="backupFile.click()">匯入備份</button>
+        <button type="button" class="save-workspace-button" (click)="previewBeforeImportBackup()">還原前備份</button>
+        <input #backupFile type="file" accept=".json,application/json" hidden (change)="readWorkspaceBackup($event)" />
       </div>
     </div>
     <p class="save-status" role="status">{{ hasUnsavedChanges() ? (autoSaveEnabled() ? '有變更，將自動儲存…' : '有尚未儲存的變更') : (saveStatus() || '資料已儲存') }}</p>
     @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p> }
+    @if (numericSettingsError()) { <p class="record-status error" role="alert">{{ numericSettingsError() }}</p> }
+    @if (storageConflict()) {
+      <div class="export-settings" role="alert"><strong>另一分頁已修改工作區，自動儲存已暫停</strong><p>請先下載備份保留目前內容，再選擇採用另一分頁資料，或保留本頁覆寫。覆寫前會在瀏覽器保留另一份資料。</p>
+        <button type="button" class="ghost-button" (click)="useOtherTabWorkspace()">採用另一分頁資料</button>
+        <button type="button" class="ghost-button" (click)="keepThisTabWorkspace()">確認保留本頁並覆寫</button>
+      </div>
+    }
     @if (backupStatus()) { <p class="record-status" role="status">{{ backupStatus() }}</p> }
+    @if (importPreview(); as preview) {
+      <div class="export-settings"><strong>還原 {{ preview.filename }}</strong><p>{{ preview.stocks }} 檔股票 · {{ preview.positions }} 筆持倉 · {{ preview.orders }} 筆預設單 · {{ preview.fills }} 筆成交紀錄</p>
+        <p>確認後將取代目前工作區，不合併資料。</p><button type="button" class="ghost-button" (click)="confirmWorkspaceImport()">確認取代並還原</button><button type="button" class="ghost-button" (click)="importPreview.set(null)">取消，保留目前資料</button>
+      </div>
+    }
     <details class="export-settings">
     <summary>預設單 Excel 匯出 <span>{{ excelPreview().count }} 筆可匯出</span></summary>
     <div class="stock-record-heading" aria-label="預設單 Excel 匯出設定">
@@ -87,7 +107,14 @@
   </section>
 
   <section class="portfolio-dashboard" aria-labelledby="portfolio-dashboard-title">
+    @if (hasSamplePositions()) {
+      <div class="export-settings"><strong>範例資料仍包含於帳戶試算</strong><p>示意持倉並非你的券商帳務。開始個人記錄前可移除兩筆範例，保留其他資料。</p>
+        @if (confirmRemoveSamples()) { <button type="button" class="ghost-button" (click)="removeSamplePositions()">確認移除示意持倉</button><button type="button" class="ghost-button" (click)="confirmRemoveSamples.set(false)">保留</button> }
+        @else { <button type="button" class="ghost-button" (click)="confirmRemoveSamples.set(true)">移除示意持倉</button> }
+      </div>
+    }
     <div class="portfolio-dashboard-heading"><div><span class="eyebrow">投資組合</span><h2 id="portfolio-dashboard-title">資產與風險總覽</h2></div><span>預設單成交後即時試算</span></div>
+    @if (estimatedPriceSymbols().length) { <p class="portfolio-warning">{{ estimatedPriceSymbols().join('、') }} 缺少行情，資產與曝險暫按該股票持倉加權進場價估計；不是即時市值。請選取股票取得行情。</p> }
     <div class="portfolio-metrics">
       <div><span>持倉成本</span><strong>{{ portfolioCost() | number:'1.0-0' }}</strong></div>
       <div><span>目前市值</span><strong>{{ portfolioMarketValue() | number:'1.0-0' }}</strong></div>
@@ -96,18 +123,60 @@
       <div><span>預設單需求</span><strong>{{ pendingOrderCapital() | number:'1.0-0' }}</strong></div>
       <div><span>成交後剩餘現金</span><strong [class.negative]="cashAfterPendingOrders() < 0">{{ cashAfterPendingOrders() | number:'1.0-0' }}</strong></div>
     </div>
-    <div class="portfolio-controls">
-      <label class="field"><span>可用現金</span><input type="number" min="0" [value]="availableCash()" (input)="availableCash.set(+($any($event.target).value || 0))" /></label>
-      <label class="field"><span>每筆最大可承受虧損</span><input type="number" min="1" [value]="maxRiskPerTrade()" (input)="maxRiskPerTrade.set(+($any($event.target).value || 1))" /></label>
-      <label class="field"><span>單一股票比重上限</span><input type="number" min="1" max="100" [value]="maxStockWeight()" (input)="maxStockWeight.set(+($any($event.target).value || 1))" /></label>
-      <label class="field"><span>手續費折數</span><input type="number" min="0" max="1" step="0.1" [value]="feeDiscount()" (input)="feeDiscount.set(+($any($event.target).value || 0))" /></label>
+
+    <div class="portfolio-metrics">
+      <div><span>多單名目金額</span><strong>{{ portfolioExposure().long | number:'1.0-0' }}</strong></div>
+      <div><span>空單名目金額</span><strong>{{ portfolioExposure().short | number:'1.0-0' }}</strong></div>
+      <div><span>總曝險（多＋空）</span><strong>{{ portfolioExposure().gross | number:'1.0-0' }}</strong></div>
+      <div><span>淨曝險（多－空）</span><strong>{{ portfolioExposure().net | number:'1.0-0' }}</strong></div>
+      <div><span>空／多金額比</span><strong>{{ portfolioExposure().ratio === null ? '無多單分母' : (portfolioExposure().ratio | number:'1.1-1') + '%' }}</strong></div>
     </div>
+    <p class="backtest-note">曝險為名目市值，不是占用資金或帳戶淨值；跨股票多空相等不代表風險抵銷。股票比重以總曝險為分母，多空不互相扣抵。</p>
+    <details class="export-settings">
+      <summary>全投資組合壓力情境 <span>{{ portfolioStress().count }} 檔有行情</span></summary>
+      <p class="backtest-note">所有股票同幅度漲跌，非相關性或 Beta 模型；多空不保證抵銷。沿用個股的停損／目標及預設單成交假設，損益是各股票結果相加，剩餘曝險為多空名目金額相加。價格可能為先前快取。</p>
+      @if (portfolioStress().missing.length) { <p class="error-text">未納入（缺少行情）：{{ portfolioStress().missing.join('、') }}。請先選擇這些股票取得行情；目前結果不是完整投資組合。</p> }
+      @if (portfolioStress().count) {
+        @for (scenario of portfolioStress().scenarios; track scenario.name) {
+          <details class="export-settings"><summary>{{ scenario.name }} · {{ portfolioStress().missing.length ? '部分組合' : '組合' }}累計損益 {{ scenario.total | number:'1.0-0' }} 元</summary>
+            <p>相較目前 {{ scenario.change | number:'1.0-0' }} 元 · 剩餘名目曝險 {{ scenario.exposure | number:'1.0-0' }} 元</p>
+            <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>股票</th><th>情境價格</th><th>累計損益</th><th>相較目前</th><th>剩餘名目曝險</th></tr></thead><tbody>
+              @for (row of scenario.rows; track row.symbol) { <tr><td>{{ row.symbol }}</td><td>{{ row.scenario.scenarioPrice | number:'1.0-2' }}</td><td>{{ row.scenario.totalProfit | number:'1.0-0' }}</td><td>{{ row.scenario.changeFromNow | number:'1.0-0' }}</td><td>{{ row.scenario.stressedExposure | number:'1.0-0' }}</td></tr> }
+            </tbody></table></div>
+          </details>
+        }
+      } @else { <p class="record-empty">尚無可計算的持倉或行情。</p> }
+    </details>
+    <details class="export-settings"><summary>日報酬相關性／Beta（比較基準 0050）</summary>
+      <button type="button" class="ghost-button" [disabled]="analysisLoading()" (click)="loadDailyAnalysis()">{{ analysisLoading() ? '資料載入中…' : '載入／更新日行情分析' }}</button>
+      <p role="status">{{ analysisStatus() }}</p>
+      <p class="backtest-note">Pearson 相關性及 Beta 以對齊起訖日的日收盤報酬計算；0050 是比較基準，不是完整市場指數。Beta 調整曝險＝各股票淨名目曝險×其 Beta，仍不代表風險已完全抵銷，未含預設單。</p>
+      <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>股票</th><th>共同報酬筆數</th><th>對 0050 相關性</th><th>對 0050 Beta</th></tr></thead><tbody>
+        @for (row of dailyAnalysis(); track row.symbol) { <tr><td>{{ row.symbol }}</td><td>{{ row.observations }}</td><td>{{ row.correlation === null ? '無法計算' : (row.correlation | number:'1.3-3') }}</td><td>{{ row.beta === null ? '無法計算' : (row.beta | number:'1.3-3') }}</td></tr> }
+      </tbody></table></div>
+      <p>{{ betaExposure().missing.length ? '部分組合' : '組合' }} Beta 調整淨曝險：{{ betaExposure().value | number:'1.0-0' }} 元</p>
+      <p class="backtest-note">使用未還原日收盤價；除權息、分割或資料缺漏可能扭曲結果。這是目前樣本的統計估計，不能當作未來避險保證。</p>
+      <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>持倉股票組合</th><th>共同日報酬筆數</th><th>相關性</th></tr></thead><tbody>
+        @for (pair of pairwiseCorrelations(); track pair.left + pair.right) { <tr><td>{{ pair.left }}／{{ pair.right }}</td><td>{{ pair.observations }}</td><td>{{ pair.correlation === null ? '無法計算' : (pair.correlation | number:'1.3-3') }}</td></tr> }
+      </tbody></table></div>
+      @if (betaExposure().missing.length) { <p class="error-text">未納入（缺少行情或 Beta）：{{ betaExposure().missing.join('、') }}</p> }
+    </details>
+    <details class="export-settings"><summary>產業集中度（自訂分類）</summary>
+      <p class="backtest-note">分類由你自行填寫，非官方產業資料。比重以持倉總曝險為分母，多空相加；未填分類列為未分類，缺行情估值沿用上方提示。</p>
+      <div class="field-grid">@for (row of dailyAnalysis(); track row.symbol) {
+        <label class="field"><span>{{ row.symbol }} 產業分類</span><input type="text" maxlength="40" placeholder="例如：半導體" [value]="stockIndustries()[row.symbol] || ''" (change)="setStockIndustry(row.symbol, $any($event.target).value)" /></label>
+      }</div>
+      <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>分類</th><th>名目曝險</th><th>總曝險比重</th></tr></thead><tbody>@for (row of industryExposure(); track row.industry) { <tr><td>{{ row.industry }}</td><td>{{ row.value | number:'1.0-0' }}</td><td>{{ row.weight | number:'1.1-1' }}%</td></tr> }</tbody></table></div>
+    </details>
+
+
     <div class="concentration-list">
       @for (item of portfolioConcentration(); track item.symbol) {
         <div [class.warning]="item.weight > maxStockWeight()"><span>{{ item.symbol }}</span><div><i [style.width.%]="item.weight"></i></div><strong>{{ item.weight | number:'1.1-1' }}%</strong></div>
       }
     </div>
     @if (cashAfterPendingOrders() < 0) { <p class="portfolio-warning">預設單全部成交將超過可用現金 {{ -cashAfterPendingOrders() | number:'1.0-0' }} 元。</p> }
+    <p class="backtest-note">預設單資金需求以完整名目價金加進場手續費計算，放空進場另含賣出稅；含目前最低費設定，不使用保證金槓桿，既有持倉賣出不先預計入現金。</p>
   </section>
 
   <section class="simulator-grid">
@@ -134,6 +203,10 @@
       </div>
 
       <div class="chart-wrap">
+        @if (priceAlertMessage()) { <p class="portfolio-warning" role="status">{{ priceAlertMessage() }}（依最近取得行情）</p> }
+        @if (quoteFetchedAt()) {
+          <p class="backtest-note">來源：{{ quoteSource() }} · 行情日期 {{ quoteDate() }} · 行情時間 {{ quoteSourceTime() }} · 取得於 {{ quoteFetchedAt() }}（台北）。{{ quoteSource() === 'MIS' ? 'MIS 輪詢快照，可能延遲，非逐筆即時串流。' : '歷史日行情，非盤中即時報價。' }}</p>
+        }
         @if (quoteError()) { <p class="error-text" role="alert">{{ quoteError() }} 請確認代號與日期後，按「重新整理行情」重試。</p> }
         @if (requestedDate() !== todayDate()) { <p class="backtest-note">歷史查詢：{{ requestedDate() }}。盤中更新暫停，按「回到今天」可繼續查看當日行情。</p> }
         @if (tooltip()) {
@@ -154,6 +227,25 @@
         }
 
         <div class="chart-section-label"><span>價格走勢</span><em>OHLC · {{ chartDays() }} 日</em></div>
+        <details class="export-settings">
+          <summary>短線規劃參考 <span>{{ planningLevels().date || '等待歷史行情' }}</span></summary>
+          <div class="field-grid">
+            <label class="field"><span>價格下限提醒</span><input type="number" min="0.01" step="0.01" placeholder="留空關閉" [value]="currentPriceAlert().lower ?? ''" (change)="updatePriceAlert('lower', $any($event.target).value)" /></label>
+            <label class="field"><span>價格上限提醒</span><input type="number" min="0.01" step="0.01" placeholder="留空關閉" [value]="currentPriceAlert().upper ?? ''" (change)="updatePriceAlert('upper', $any($event.target).value)" /></label>
+          </div>
+          @if (priceAlertError()) { <p class="error-text" role="alert">{{ priceAlertError() }}</p> }
+          <p class="backtest-note">提醒只在此頁依最新取得的報價顯示；關閉頁面不監測，不發送通知或自動下單。</p>
+          <div class="portfolio-metrics">
+            <div><span>前一交易日高點</span><strong>{{ planningLevels().previousHigh === null ? '資料不足' : (planningLevels().previousHigh | number:'1.0-2') }}</strong></div>
+            <div><span>前一交易日低點</span><strong>{{ planningLevels().previousLow === null ? '資料不足' : (planningLevels().previousLow | number:'1.0-2') }}</strong></div>
+            <div><span>前 20 交易日高點</span><strong>{{ planningLevels().high20 === null ? '資料不足' : (planningLevels().high20 | number:'1.0-2') }}</strong></div>
+            <div><span>前 20 交易日低點</span><strong>{{ planningLevels().low20 === null ? '資料不足' : (planningLevels().low20 | number:'1.0-2') }}</strong></div>
+            <div><span>ATR14（日線）</span><strong>{{ planningLevels().atr === null ? '資料不足' : (planningLevels().atr | number:'1.0-2') }}</strong></div>
+            <div><span>相對前 20 日均量</span><strong>{{ planningLevels().relativeVolume === null ? '資料不足' : (planningLevels().relativeVolume | number:'1.2-2') + ' 倍' }}</strong></div>
+          </div>
+          <p class="backtest-note">前一交易日：{{ planningLevels().previousDate || '無資料' }}。前 20 日高低點及均量不含最後一根日線。ATR 用真實波幅的 14 日 Wilder 平滑，依固定歷史基準计算，切換顯示天數不重算起點。</p>
+          <p class="backtest-note">數值對應最後一根日線，未必是今天。啟用盤中更新後當日數值未定案；盤中累計量與完整日均量比較不是同時段量比。此區僅供規劃參考，未自動套用停損。</p>
+        </details>
         <svg viewBox="0 0 760 310" class="stock-chart" preserveAspectRatio="xMidYMid meet" aria-label="歷史股價圖表">
           @for (tick of chartPriceTicks(); track tick.y) {
             <line x1="18" [attr.y1]="tick.y" x2="742" [attr.y2]="tick.y" class="chart-grid-line"></line>
@@ -261,12 +353,13 @@
           <strong>{{ latestSession()?.low | number: '1.0-0' }}</strong>
         </div>
         <div class="stat-pill">
-          <span>當日漲跌幅</span>
+          <span>漲跌金額／漲跌幅</span>
           <strong>{{ quoteChange() | number: '1.0-2' }}</strong>
+          <small>{{ latestPrice() - quoteChange() > 0 ? (quoteChange() / (latestPrice() - quoteChange()) * 100 | number:'1.2-2') + '%' : '無資料' }}</small>
         </div>
         <div class="stat-pill">
           <span>成交金額</span>
-          <strong>{{ turnover() | number: '1.0-0' }}</strong>
+          <strong>{{ turnover() > 0 ? (turnover() | number: '1.0-0') : '無資料' }}</strong>
         </div>
         <div class="stat-pill">
           <span>成交量</span>
@@ -389,9 +482,9 @@
             }
             <label class="field">
               <span>{{ orderEntryMode() === 'preset' ? '交易類型' : '持倉方向' }}</span>
-              <select [value]="positionForm().type" [disabled]="orderEntryMode() === 'preset' && presetOrderAction() === 'sell'" (change)="onPositionFieldChange('type', $any($event.target).value)">
+              <select [value]="positionForm().type" (change)="onPositionFieldChange('type', $any($event.target).value)">
                 @for (item of orderOptions; track item.value) {
-                  <option [value]="item.value">{{ item.label }}</option>
+                  <option [value]="item.value" [disabled]="orderEntryMode() === 'preset' && presetOrderAction() === 'sell' && (item.value === '空單' || item.value === '融券')">{{ item.label }}</option>
                 }
               </select>
             </label>
@@ -413,7 +506,9 @@
             <label class="field"><span>停損價（選填）</span><input type="number" [value]="positionForm().stopLossPrice ?? ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('stopLossPrice', $any($event.target).value ? +$any($event.target).value : undefined)" /></label>
             @if (orderEntryMode() === 'preset') {
               <label class="field"><span>預計出場價（選填）</span><input type="number" [value]="positionForm().targetPrice || ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 0))" /></label>
-              <label class="field"><span>預設單有效日</span><small>今日起 5 個交易日，不含週末</small><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
+              <label class="field"><span>預設單有效日</span><small>首個可交易日起 5 日，排除週末及已知休市日</small><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
+              <p class="backtest-note">日曆依證交所 2026 年開休市表（2026/10/09 核對），不自動包含颱風等臨時停市；仍需核對市場公告。</p>
+              @if (calendarCoverageWarning()) { <p class="error-text">此日期範圍含未載入官方日曆的年份，目前僅排除週末，請自行核對有效日。</p> }
             }
             <label class="field">
               <span>備註</span>
@@ -423,25 +518,35 @@
           <button type="button" class="ghost-button" (click)="useCurrentMarketPrice()">帶入目前股價</button>
           <p class="record-status">{{ positionForm().symbol }} · {{ positionForm().type }} · {{ positionForm().shares | number:'1.0-0' }} 股 × {{ positionForm().entryPrice | number:'1.0-2' }} 元 · 金額 {{ positionForm().shares * positionForm().entryPrice | number:'1.0-0' }} 元（未含交易成本）</p>
           @if (orderFormError()) { <p class="error-text" role="alert">{{ orderFormError() }}</p> }
+          @if (orderEntryMode() === 'preset' && presetOrderAction() === 'sell') {
+            <p class="record-status">{{ positionForm().type }} 持倉 {{ matchingSellHoldings() }} 股 · 其他有效賣出單 {{ reservedSellShares() }} 股 · 本單可委託 {{ availableSellOrderShares() }} 股</p>
+            <p class="backtest-note">依同股票、同交易類型合計，編輯時排除本單；已知過期單不占用額度。多筆賣出單視為都可能成交，不假設互斥。</p>
+          }
+          @if (orderEntryMode() === 'preset' && pricePlanningError()) { <p class="error-text" role="alert">{{ pricePlanningError() }}</p> }
           @if (orderStatus()) { <p class="record-status" role="status">{{ orderStatus() }}</p> }
           @if (orderEntryMode() === 'preset') {
             <div class="order-risk-card">
-              <div><span>本單預估風險</span><strong class="negative">{{ proposedOrderRisk() | number:'1.0-0' }}</strong></div>
-              <div><span>目標預估報酬</span><strong class="positive">{{ proposedOrderReward() | number:'1.0-0' }}</strong></div>
-              <div><span>風險報酬比</span><strong>{{ proposedRiskRewardRatio() | number:'1.2-2' }}</strong></div>
+              <div><span>停損預估損失</span><strong class="negative">{{ proposedOrderRisk() === null ? '無法計算' : (proposedOrderRisk() | number:'1.0-0') }}</strong></div>
+              <div><span>目標預估淨損益</span><strong [class.negative]="(proposedOrderReward() ?? 0) < 0">{{ proposedOrderReward() === null ? '無法計算' : (proposedOrderReward() | number:'1.0-0') }}</strong></div>
+              <div><span>風險報酬比</span><strong>{{ proposedRiskRewardRatio() === null ? '無法計算' : (proposedRiskRewardRatio() | number:'1.2-2') }}</strong></div>
               <div><span>依風險上限建議</span><strong>{{ suggestedRiskShares() | number:'1.0-0' }} 股</strong></div>
-              <button type="button" class="ghost-button" (click)="applySuggestedShares()">套用建議股數</button>
+              <button type="button" class="ghost-button" [disabled]="suggestedRiskShares() <= 0" (click)="applySuggestedShares()">套用建議股數</button>
+              <p class="backtest-note">股數同時受停損風險、資金與交易單位限制，資金按完整名目金額加進場費估算。最低手續費依成本模型設定；未含滑價及跳空成本，非保證最大損失。</p>
+              @if (!pricePlanningError() && suggestedRiskShares() === 0 && proposedStopLoss()) { <p class="error-text">預算不足目前交易單位；不足一張請切換零股或調整規劃。</p> }
             </div>
           }
           @if (orderEntryMode() === 'holding') {
             <button type="button" class="action-button" [disabled]="!!orderFormError()" (click)="addTradePosition()">{{ editingPositionId() ? '儲存持倉修改' : '新增已入倉股票' }}</button>
           } @else {
-            <button type="button" class="preset-button form-submit" [disabled]="!!orderFormError()" (click)="createPresetOrderFromForm()">{{ editingPresetOrderId() ? '儲存預設單修改' : '＋ 建立近期預設單' }}</button>
+            <button type="button" class="preset-button form-submit" [disabled]="!!orderFormError() || !!pricePlanningError()" (click)="createPresetOrderFromForm()">{{ editingPresetOrderId() ? '儲存預設單修改' : '＋ 建立近期預設單' }}</button>
           }
         </div>
       </div>
 
       @if (fillMessage()) { <p class="record-status" role="status">{{ fillMessage() }}</p> }
+      @for (group of oversubscribedSellOrders(); track group.symbol + group.type) {
+        <p class="error-text" role="alert">{{ group.symbol }} {{ group.type }} 的有效賣出委託 {{ group.reserved }} 股超過持倉 {{ group.held }} 股，請調整或取消委託。</p>
+      }
       @if (currentStockPresetOrders().length) {
         <section class="preset-order-list" aria-label="近期預設單">
           <div class="preset-list-title"><h3>近期預設單</h3><span>虛線菱形已同步顯示於座標圖</span></div>
@@ -474,6 +579,21 @@
       }
 
       <section class="preset-order-list" aria-labelledby="fill-history-title">
+        @if (lastTradeUndo(); as undo) {
+          <div class="export-settings"><strong>最近一次記錄：{{ undo.description }}</strong>
+            <p class="backtest-note">僅可撤回本頁最近一次成交操作，重新開啟頁面不保留此入口。撤回會還原相關持倉、委託與交易歷史，不會撤銷券商成交。</p>
+            @if (!canUndoTrade()) { <p class="error-text">後續交易資料已改變，無法安全撤回。</p> }
+            @if (confirmUndoTrade()) {
+              <button type="button" class="ghost-button" [disabled]="!canUndoTrade()" (click)="undoLastTradeRecord()">確認撤回網站紀錄</button><button type="button" class="ghost-button" (click)="confirmUndoTrade.set(false)">保留紀錄</button>
+            } @else { <button type="button" class="ghost-button" [disabled]="!canUndoTrade()" (click)="confirmUndoTrade.set(true)">撤回最近一次誤填</button> }
+          </div>
+        }
+        @if (undoTradeStatus()) { <p class="record-status" role="status">{{ undoTradeStatus() }}</p> }
+        <details class="export-settings"><summary>委託狀態歷史 <span>{{ orderHistory().length }} 筆（依下方股票範圍）</span></summary>
+          <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>股票</th><th>方向／類型</th><th>委託價</th><th>剩餘／取消股數</th><th>狀態</th><th>有效至</th></tr></thead><tbody>
+            @for (order of orderHistory(); track order.id) { <tr><td>{{ order.symbol }}</td><td>{{ order.action === 'sell' ? '賣出' : '買進' }} · {{ order.type }}</td><td>{{ order.entryPrice | number:'1.0-2' }}</td><td>{{ order.shares }}</td><td>{{ order.status }}</td><td>{{ order.expiryDate || '未設定' }}</td></tr> }
+          </tbody></table></div><p class="backtest-note">取消與已成交單不再計入資金或情境；取消股數為取消當時剩餘量。僅保留新版本後的結束紀錄，舊版已刪除委託無法補回。</p>
+        </details>
         <div class="preset-list-title"><h3 id="fill-history-title">預設單成交紀錄</h3>
           <button type="button" class="ghost-button" [disabled]="exportingExcel() || !visiblePresetFills().length" (click)="exportPresetOrdersExcel(true)">{{ exportingExcel() ? 'Excel 產生中…' : '匯出成交紀錄（' + visiblePresetFills().length + ' 筆）' }}</button>
           <label>顯示範圍 <select [value]="fillHistoryScope()" (change)="fillHistoryScope.set($any($event.target).value)"><option value="current">目前股票</option><option value="all">全部股票</option></select></label>
@@ -492,7 +612,7 @@
         <div class="panel-header"><div><span class="section-eyebrow">隔日個股風險</span><h3 id="stress-title">{{ stockSymbol() }} 持倉／預設單壓力測試</h3></div><div class="panel-header-actions"><span class="badge">{{ stressScenarios().length }} 種情境</span><button type="button" class="collapse-button" (click)="togglePanel('stress')" [attr.aria-expanded]="!collapsedPanels().has('stress')">⌃</button></div></div>
         <div class="stress-summary"><span>計算基準 <strong>{{ valuationPrice() | number:'1.0-2' }}</strong></span><span>{{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><span>預設買入假設成交；預設賣出於情境價達標時觸發</span></div>
         <div class="stress-table-wrap"><table class="stress-table stock-stress-table">
-          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>預設單影響</th><th>合計損益</th><th>成交後曝險</th><th>狀態</th></tr></thead>
+          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>預設單影響</th><th>合計損益</th><th>情境後剩餘名目曝險</th><th>狀態</th></tr></thead>
           <tbody>@for (scenario of stressScenarios(); track scenario.id) {
             <tr [class.warning]="scenario.severity === 'warning'" [class.critical]="scenario.severity === 'critical'">
               <td><strong>{{ scenario.name }}</strong><small>{{ scenario.assumption }}</small></td><td>{{ scenario.scenarioPrice | number:'1.0-2' }}</td>
@@ -504,6 +624,20 @@
           }</tbody>
         </table></div>
         <p class="backtest-note">僅對目前選取個股進行隔日情境試算；跳空情境不假設能在中間價位停損。</p>
+        @for (scenario of stressScenarios(); track scenario.id) {
+          <details class="export-settings">
+            <summary>{{ scenario.name }} · 逐筆計算 <span>相較目前 {{ scenario.changeFromNow | number:'1.0-0' }} 元</span></summary>
+            <p class="backtest-note">累計損益從原入場價起算；相較目前＝情境合計減目前持倉按同一成本設定估值的損益，包含假設新單進場影響，不代表最大可能損失。成本欄是該筆假設的完整成本，不另加入損益贡献。</p>
+            <div class="stress-table-wrap"><table class="stress-table">
+              <thead><tr><th>記錄／方向</th><th>股數</th><th>入場價</th><th>假設出場／估值價</th><th>條件</th><th>估計成本</th><th>損益貢獻</th><th>剩餘股數</th></tr></thead>
+              <tbody>@for (detail of scenario.details; track $index) {
+                <tr><td>{{ detail.label }}</td><td>{{ detail.shares }}</td><td>{{ detail.entry | number:'1.0-2' }}</td><td>{{ detail.exit | number:'1.0-2' }}</td><td>{{ detail.reason }}</td><td>{{ detail.costs | number:'1.0-2' }}</td><td [class.negative]="detail.contribution < 0">{{ detail.contribution | number:'1.0-2' }}</td><td>{{ detail.remaining ?? '見對應持倉列' }}</td></tr>
+              }</tbody>
+            </table></div>
+            <p>損益貢獻合計：{{ scenario.totalProfit | number:'1.0-2' }} 元</p>
+            <p class="backtest-note">所有進場預設單仍假設成交。逐步情境先處理持倉停損／目標，再處理預設賣出，只扣減尚未出場的同交易類型持倉；此順序是模型假設，未還原真實盤中路徑。跳空僅按情境價估值，不假設停損成交。剩餘曝險＝情境價格×尚未出場股數，多空金額相加。</p>
+          </details>
+        }
       </section>
 
       <div id="holdings-center" class="holding-center-toolbar">
@@ -522,6 +656,25 @@
           <div class="future-layout-results"><div><span>整合持倉</span><strong>{{ currentStockPositions().length }} 筆 · {{ currentStockHoldingShares() | number:'1.0-0' }} 股</strong></div><div><span>目前損益</span><strong [class.positive]="currentStockMarketProfit() >= 0" [class.negative]="currentStockMarketProfit() < 0">{{ currentStockMarketProfit() | number:'1.0-0' }}</strong></div><div><span>目標價預期淨利</span><strong>{{ longTermProfit() | number:'1.0-0' }}</strong></div><div><span>預期 ROI</span><strong>{{ longTermRoi() | number:'1.2-2' }}%</strong></div><button type="button" class="preset-button" [disabled]="!currentStockPositions().length" (click)="applyLongTermTargetToPositions()">套用到本股全部持倉</button></div>
         </div>
       </section>
+      @if (closingStatus()) { <p class="record-status" role="status">{{ closingStatus() }}</p> }
+      @if (closingPosition(); as position) {
+        <section class="order-risk-card" aria-label="實際平倉確認">
+          <h3>{{ position.symbol }} · {{ position.type }} · {{ closingIsShort() ? '記錄回補' : '記錄平倉' }}</h3>
+          <div class="field-grid">
+            <label class="field"><span>實際成交日期</span><input type="date" [min]="position.tradeDate || ''" [max]="todayDate()" [value]="closingDate()" (change)="closingDate.set($any($event.target).value)" /></label>
+            <label class="field"><span>實際成交價</span><input type="number" min="0.01" step="0.01" [value]="closingPrice()" (input)="closingPrice.set(+$any($event.target).value)" /></label>
+            <label class="field"><span>本次股數（最多 {{ position.shares }}）</span><input type="number" min="1" step="1" [max]="position.shares" [value]="closingShares()" (input)="closingShares.set(+$any($event.target).value)" /></label>
+          </div>
+          @if (closingError()) { <p class="error-text" role="alert">{{ closingError() }}</p> }
+          @if (closingPreview(); as preview) {
+            <p>價差損益 {{ preview.gross | number:'1.0-2' }} 元 · 預估成本 {{ preview.costs.total | number:'1.0-2' }} 元 · 淨損益 {{ preview.net | number:'1.0-2' }} 元 · 剩餘 {{ preview.remaining }} 股</p>
+            <p class="backtest-note">買進費 {{ preview.costs.buyFee | number:'1.0-2' }}／賣出費 {{ preview.costs.sellFee | number:'1.0-2' }}／交易稅 {{ preview.costs.transactionTax | number:'1.0-2' }}／融資利息 {{ preview.costs.financingCost | number:'1.0-2' }}／借券成本 {{ preview.costs.borrowCost | number:'1.0-2' }}。</p>
+          }
+          <p class="backtest-note">依券商實際成交回報填寫。新成交持倉的進場費稅按股數比例分攤，出場費按目前模型估算；舊持倉沒有進場快照時沿用估算。非券商帳務，規劃資金不自動調整。</p>
+          <button type="button" class="ghost-button" [disabled]="!!closingError()" (click)="confirmPositionClose()">確認記錄{{ closingIsShort() ? '回補' : '平倉' }}</button>
+          <button type="button" class="ghost-button" (click)="closingPositionId.set(null)">返回，不變更持倉</button>
+        </section>
+      }
       <app-position-details
         [positions]="visibleHoldingPositions()"
         [currentSymbol]="stockSymbol()"
@@ -529,6 +682,9 @@
         [fallbackPrice]="valuationPrice()"
         [pricesBySymbol]="latestPrices()"
         [feeDiscount]="feeDiscount()"
+        [asOfDate]="todayDate()"
+        [financingRate]="financingRate()"
+        [borrowRate]="shortBorrowRate()"
         (positionChange)="onPositionInlineChange($event)"
         (positionClose)="closeTradePosition($event)"
         (positionDelete)="removeTradePosition($event)"
@@ -536,171 +692,80 @@
       />
       @if (closedTrades().length) {
         <section class="closed-trade-list"><h3>已實現交易</h3>
+          @for (trade of closedTrades(); track trade.id) {
+            <details class="export-settings"><summary>{{ trade.symbol }} · {{ trade.type }} · {{ trade.exitDate }} · {{ trade.shares }} 股成本明細</summary>
+              @if (trade.costBreakdown; as cost) {
+                <p>買進費 {{ cost.buyFee | number:'1.0-2' }} · 賣出費 {{ cost.sellFee | number:'1.0-2' }} · 稅 {{ cost.transactionTax | number:'1.0-2' }} · 融資利息 {{ cost.financingCost | number:'1.0-2' }} · 借券成本 {{ cost.borrowCost | number:'1.0-2' }} · 合计 {{ cost.total | number:'1.0-2' }} 元</p>
+                @if (trade.costAssumptions; as settings) { <p class="backtest-note">當時設定：費率 {{ settings.feeRate }}／最低費 {{ settings.minimumFee }}／折數 {{ settings.feeDiscount }}／稅率 {{ settings.taxRate }}／融資借款比例 {{ settings.financingLoanRatio }}／融資年率 {{ settings.financingRate }}%／借券年率 {{ settings.borrowRate }}%／持有 {{ settings.holdingDays }} 天。</p> }
+                <p class="backtest-note">此為確認時保存的估算快照，不隨目前設定改變，亦非券商實際費用明細。</p>
+              } @else { <p class="backtest-note">舊紀錄未保存成本快照，僅保留原已實現損益，不套用新設定補算。</p> }
+            </details>
+          }
           @for (trade of closedTrades(); track trade.id) { <div><strong>{{ trade.symbol }}</strong><span>{{ trade.shares | number:'1.0-0' }} 股</span><span>{{ trade.entryPrice | number:'1.0-2' }} → {{ trade.exitPrice | number:'1.0-2' }}</span><span>{{ trade.exitDate }}</span><strong [class.positive]="trade.realizedProfit >= 0" [class.negative]="trade.realizedProfit < 0">{{ trade.realizedProfit | number:'1.0-0' }}</strong></div> }
         </section>
       }
     </article>
 
-    @if (false) { <article class="panel" [class.collapsed]="collapsedPanels().has('short')">
-      <div class="panel-header">
-        <h2>短線模擬</h2>
-        <div class="panel-header-actions"><span class="badge">{{ dayBias() }}</span><button type="button" class="collapse-button" (click)="togglePanel('short')" [attr.aria-expanded]="!collapsedPanels().has('short')" aria-label="收合短線模擬">⌃</button></div>
-      </div>
-
-      <div class="field-grid">
-        <label class="field">
-          <span>目標股票</span>
-          <input type="text" [value]="stockSymbol()" readonly />
-        </label>
-
-        <label class="field"><span>目前市價</span><input type="number" [value]="valuationPrice()" readonly /></label>
-
-        <label class="field">
-          <span>明日漲停價</span>
-          <input type="number" [value]="limitUpPrice()" (input)="onLimitUpChange(+($any($event.target).value || 0))" />
-        </label>
-
-        <label class="field">
-          <span>明日跌停價</span>
-          <input type="number" [value]="limitDownPrice()" (input)="onLimitDownChange(+($any($event.target).value || 0))" />
-        </label>
-
-        <label class="field">
-          <span>下單單位</span>
-          <select [value]="simulationShareUnit()" (change)="onSimulationShareUnitChange($any($event.target).value)"><option value="boardLot">整張</option><option value="oddLot">零股</option></select>
-        </label>
-
-        <label class="field"><span>下單股數</span><input type="number" [value]="shares()" [min]="simulationShareUnit() === 'boardLot' ? 1000 : 1" [max]="simulationShareUnit() === 'oddLot' ? 999 : null" [step]="simulationShareUnit() === 'boardLot' ? 1000 : 1" (input)="shares.set(+($any($event.target).value || 1))" /></label>
-
-        <label class="field"><span>預設單有效日</span><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
-      </div>
-
-      <div class="action-row">
-        <button type="button" class="action-button" (click)="loadCurrentPrice()">
-          {{ isLoadingQuote() ? '更新中…' : '更新真實股價' }}
-        </button>
-        <span class="quote-status">
-          {{ quoteDate() ? '資料日期：' + quoteDate() : '尚未取得實時資料' }}
-        </span>
-      </div>
-
-      @if (quoteError()) {
-        <p class="error-text">{{ quoteError() }}</p>
+    <article class="panel backtest-panel">
+      <div class="panel-header"><h2>單筆策略歷史模擬</h2><span class="badge">{{ chartDays() }} 日 · {{ positionForm().type }}</span></div>
+      <p class="backtest-note">將目前表單規劃套用到所選歷史區間，僅模擬一次進場／出場，不使用預設單有效日，也不回寫持倉。股票必須與行情一致。資金使用可用現金，全名目部位、不使用槓桿。</p>
+      @if (positionForm().symbol !== stockSymbol()) { <p class="error-text">表單股票與圖表股票不同，請先選取同一股票。</p> }
+      @else if (plannedTradeResult().error) { <p class="error-text">{{ plannedTradeResult().error }}</p> }
+      @else {
+        <p>狀態：{{ plannedTradeResult().status }} · 淨損益 {{ plannedTradeResult().profit | number:'1.0-2' }} 元 · 成本 {{ plannedTradeResult().costs | number:'1.0-2' }} 元 · 期末模擬權益 {{ plannedTradeResult().endingEquity | number:'1.0-2' }} 元</p>
+        @if (plannedTradeResult().entryDate) { <p>進場 {{ plannedTradeResult().entryDate }}／{{ plannedTradeResult().entryPrice | number:'1.0-2' }} 元 → {{ plannedTradeResult().status === '已出場' ? '出場' : '估值' }} {{ plannedTradeResult().exitDate }}／{{ plannedTradeResult().exitPrice | number:'1.0-2' }} 元 · {{ plannedTradeResult().reason }}</p> }
+        @else if (plannedTradeResult().reason) { <p class="backtest-note">{{ plannedTradeResult().reason }}</p> }
+        <p>收盤／出場估值權益最大回撤 {{ plannedTradeResult().maxDrawdown | number:'1.2-2' }}% · 同日雙觸發 {{ plannedTradeResult().ambiguousDays }} 次</p>
       }
-
-      <div class="price-window">
-        <div class="range-labels">
-          <span>跌停 {{ minPrice() | number: '1.0-0' }}</span>
-          <span>漲停 {{ maxPrice() | number: '1.0-0' }}</span>
-        </div>
-        <div class="range-track">
-          <div class="range-fill" [style.width.%]="selectedPricePercent()"></div>
-          <div class="range-marker" [style.left.%]="selectedPricePercent()"></div>
-        </div>
-        <input
-          class="range-input"
-          type="range"
-          [min]="minPrice()"
-          [max]="maxPrice()"
-          [value]="selectedPrice()"
-          (input)="onPriceChange(+($any($event.target).value || minPrice()))"
-        />
-      </div>
-
-      <div class="price-row">
-        <label class="field compact">
-          <span>欲下單價格</span>
-          <input type="number" [value]="selectedPrice()" (input)="onPriceChange(+($any($event.target).value || minPrice()))" />
-        </label>
-        <div class="price-pill">
-          <span>當前選擇</span>
-          <strong>{{ selectedPrice() | number: '1.0-0' }}</strong>
-        </div>
-      </div>
-
-      <div class="order-options">
-        @for (item of orderOptions; track item.value) {
-          <label class="order-card" [class.active]="orderType() === item.value">
-            <input type="radio" name="orderType" [value]="item.value" [checked]="orderType() === item.value" (change)="orderType.set(item.value)" />
-            <div>
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.detail }}</span>
-            </div>
-          </label>
-        }
-      </div>
-
-      <div class="result-box">
-        <div>
-          <span>短線預估獲利（漲停）</span>
-          <strong class="positive">{{ shortTermProfitRange().bull | number: '1.0-0' }}</strong>
-        </div>
-        <div>
-          <span>短線預估獲利（跌停）</span>
-          <strong class="negative">{{ shortTermProfitRange().bear | number: '1.0-0' }}</strong>
-        </div>
-        <p>{{ positionSummary() }}</p>
-        <button type="button" class="preset-button result-preset" (click)="createPresetOrder()">將此模擬加入近期預設單</button>
-      </div>
-    </article> }
-
-    @if (false) { <article class="panel" [class.collapsed]="collapsedPanels().has('long')">
-      <div class="panel-header">
-        <h2>長線布局</h2>
-        <div class="panel-header-actions"><span class="badge">預期目標價</span><button type="button" class="collapse-button" (click)="togglePanel('long')" [attr.aria-expanded]="!collapsedPanels().has('long')" aria-label="收合長線布局">⌃</button></div>
-      </div>
-
-      <div class="field-grid">
-        <label class="field">
-          <span>預期目標價格</span>
-          <input type="number" [value]="longTermTarget()" min="1" (input)="longTermTarget.set(+($any($event.target).value || 1))" />
-        </label>
-
-        <label class="field">
-          <span>持有天數</span>
-          <input type="number" [value]="holdingDays()" min="1" (input)="holdingDays.set(+($any($event.target).value || 1))" />
-        </label>
-
-        <label class="field">
-          <span>融資成本（年）</span>
-          <input type="number" [value]="financingRate()" min="0" step="0.1" (input)="financingRate.set(+($any($event.target).value || 0))" />
-        </label>
-
-        <label class="field">
-          <span>融券成本（年）</span>
-          <input type="number" [value]="shortBorrowRate()" min="0" step="0.1" (input)="shortBorrowRate.set(+($any($event.target).value || 0))" />
-        </label>
-      </div>
-
-      <div class="result-box highlighted">
-        <div><span>整合持倉</span><strong>{{ currentStockPositions().length }} 筆 · {{ currentStockHoldingShares() | number:'1.0-0' }} 股</strong></div>
-        <div><span>目前實際盈虧</span><strong [class.positive]="currentStockMarketProfit() >= 0" [class.negative]="currentStockMarketProfit() < 0">{{ currentStockMarketProfit() | number:'1.0-0' }}</strong></div>
-        <div>
-          <span>全部持倉到目標價預期淨利</span>
-          <strong>{{ longTermProfit() | number: '1.0-0' }}</strong>
-        </div>
-        <div>
-          <span>投資報酬率</span>
-          <strong>{{ longTermRoi() | number: '1.2-2' }}%</strong>
-        </div>
-        <p>{{ orderTypeHint() }}</p>
-        <button type="button" class="preset-button result-preset" [disabled]="!currentStockPositions().length" (click)="applyLongTermTargetToPositions()">套用目標價到 {{ stockSymbol() }} 全部持倉</button>
-      </div>
-    </article> }
-
+      <p class="backtest-note">限價觸及才進場；有利跳空按開盤價。進場當日不知盤中順序，保守使用整日高低判斷；雙觸發停損優先，後續跳空越過出場價按開盤價。最低手續費依成本模型設定；未模擬成交量、部分成交或交易滑價。開盤／日線不保證實際可成交；只有一筆交易，不提供多筆策略勝率或 Profit Factor。</p>
+    </article>
     <article class="panel backtest-panel" [class.collapsed]="collapsedPanels().has('backtest')">
-      <div class="panel-header"><div><span class="section-eyebrow">歷史驗證</span><h2>策略回測與回撤</h2></div><div class="panel-header-actions"><span class="badge">{{ chartDays() }} 日</span><button type="button" class="collapse-button" (click)="togglePanel('backtest')">⌃</button></div></div>
+      <div class="panel-header"><div><span class="section-eyebrow">行情區間表現</span><h2>區間多空模擬</h2></div><div class="panel-header-actions"><span class="badge">{{ chartDays() }} 日</span><button type="button" class="collapse-button" (click)="togglePanel('backtest')">⌃</button></div></div>
       @if (backtestResult().observations > 1) {
         <div class="backtest-grid">
           <div><span>樣本數</span><strong>{{ backtestResult().observations }}</strong></div>
           <div><span>區間報酬</span><strong [class.positive]="backtestResult().totalReturn >= 0" [class.negative]="backtestResult().totalReturn < 0">{{ backtestResult().totalReturn | number:'1.2-2' }}%</strong></div>
           <div><span>最大回撤</span><strong class="negative">{{ backtestResult().maxDrawdown | number:'1.2-2' }}%</strong></div>
-          <div><span>上漲日勝率</span><strong>{{ backtestResult().winRate | number:'1.1-1' }}%</strong></div>
+          <div><span>方向非虧損日比例</span><strong>{{ backtestResult().winRate | number:'1.1-1' }}%</strong></div>
           <div><span>Profit Factor</span><strong>{{ backtestResult().profitFactor | number:'1.2-2' }}</strong></div>
           <div><span>模擬期末權益</span><strong>{{ backtestResult().endingEquity | number:'1.0-0' }}</strong></div>
         </div>
-        <p class="backtest-note">依下單板目前選擇的 {{ positionForm().type }} 方向，使用圖表區間收盤價模擬。結果僅用於風險比較，不代表未來報酬。</p>
+        <p class="backtest-note">依 {{ positionForm().type }} 方向逐日收盤報酬複利計算，初始權益 100,000 元，不含成本與槓桿；未使用預設單、停損或目標條件。非虧損日比例包含平盤日，空單採反向日報酬；Profit Factor 是逐日獲利總和／逐日虧損絕對值總和；最大回撤取此模擬權益曲線。</p>
       } @else { <p class="record-empty">歷史資料不足，無法執行回測。</p> }
     </article>
   </section>
+  <section id="workspace-settings" class="stock-record-panel"><details class="export-settings"><summary>帳戶與成本設定</summary>
+    <div class="portfolio-controls">
+      <label class="field"><span>可用現金</span><input type="number" min="0" [value]="availableCash()" (input)="updateNumericSetting('availableCash', $any($event.target).value)" /></label>
+      <label class="field"><span>每筆最大可承受虧損</span><input type="number" min="1" [value]="maxRiskPerTrade()" (input)="updateNumericSetting('maxRiskPerTrade', $any($event.target).value)" /></label>
+      <label class="field"><span>單一股票比重上限</span><input type="number" min="1" max="100" [value]="maxStockWeight()" (input)="updateNumericSetting('maxStockWeight', $any($event.target).value)" /></label>
+      <label class="field"><span>手續費折數</span><input type="number" min="0" max="1" step="0.1" [value]="feeDiscount()" (input)="updateNumericSetting('feeDiscount', $any($event.target).value)" /></label>
+    </div>
+    <details class="export-settings"><summary>交易成本模型（自訂假設）</summary>
+      <div class="field-grid">
+        <label class="field"><span>手續費率（小數）</span><input type="number" min="0" max="1" step="0.000001" [value]="costModel().feeRate" (change)="updateCostModel('feeRate', $any($event.target).value)" /></label>
+        <label class="field"><span>每次買／賣最低手續費（元）</span><input type="number" min="0" step="1" [value]="costModel().minimumFee" (change)="updateCostModel('minimumFee', $any($event.target).value)" /></label>
+        <label class="field"><span>賣出交易稅率（小數）</span><input type="number" min="0" max="1" step="0.0001" [value]="costModel().taxRate" (change)="updateCostModel('taxRate', $any($event.target).value)" /></label>
+        <label class="field"><span>融資借款比例（小數）</span><input type="number" min="0" max="1" step="0.01" [value]="costModel().financingLoanRatio" (change)="updateCostModel('financingLoanRatio', $any($event.target).value)" /></label>
+      </div>
+      @if (costModelError()) { <p class="error-text">{{ costModelError() }}</p> }
+      <p class="backtest-note">每次手續費＝成交金額×費率×上方折數，並套用每次最低費用。稅在賣出端計算；融資利息按借款比例、年利率及天數估計，融券按名目本金與年利率估計。預設沿用既有模型，不代表你的券商條件。</p>
+      <p class="backtest-note">全工作區共用；ETF、當沖或不同券商費率須自行調整，不自動辨識。每筆部分成交按獨立買賣估算，最低費用是否合併收取依券商帳務；未模擬滑價、借券其他費用或保證金。設定變更不回溯改寫已保存的已實現損益。</p>
+    </details>
+    <details class="export-settings"><summary>現股資金流水（獨立估算）</summary>
+      <label><input type="checkbox" [checked]="cashTrackingEnabled()" (change)="cashTrackingEnabled.set($any($event.target).checked)" /> 啟用新現股成交的自動流水記錄</label>
+      <p class="backtest-note">起始餘額由你自行核對；只記錄啟用後新確認的現股成交，不補登舊交易。買進扣金額及買進費，賣出增加扣除費稅後金額；非券商已交割餘額，未模擬交割日、融資或保證金。與規劃資金分開。</p>
+      <div class="field-grid">
+        <label class="field"><span>起始流水餘額</span><input type="number" [value]="cashOpeningBalance()" (change)="updateNumericSetting('cashOpeningBalance', $any($event.target).value)" /></label>
+        <label class="field"><span>手動流水方向</span><select [value]="cashMovementKind()" (change)="cashMovementKind.set($any($event.target).value)"><option value="deposit">存入</option><option value="withdrawal">支出</option></select></label>
+        <label class="field"><span>金額</span><input type="number" min="0.01" [value]="cashMovementAmount()" (input)="cashMovementAmount.set(+$any($event.target).value)" /></label>
+        <label class="field"><span>備註</span><input type="text" [value]="cashMovementNote()" (input)="cashMovementNote.set($any($event.target).value)" /></label>
+      </div>
+      <button type="button" class="ghost-button" (click)="addManualCashMovement()">新增存入／支出</button>
+      <p>流水餘額：{{ trackedCashBalance() | number:'1.0-2' }} 元</p>
+      <button type="button" class="ghost-button" [disabled]="trackedCashBalance() < 0" (click)="applyTrackedCash()">帶入規劃資金</button>
+      @if (cashLedgerStatus()) { <p role="status">{{ cashLedgerStatus() }}</p> }
+      <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>日期</th><th>方向</th><th>現金變動</th><th>備註</th></tr></thead><tbody>@for (movement of cashMovements(); track movement.id) { <tr><td>{{ movement.date }}</td><td>{{ movement.kind }}</td><td>{{ movement.amount | number:'1.0-2' }}</td><td>{{ movement.note }}</td></tr> }</tbody></table></div>
+    </details>
+  </details></section>
 </main>
