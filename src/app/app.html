@@ -29,7 +29,7 @@
   </section>
 
   <section class="stock-record-panel" aria-labelledby="stock-record-title">
-    <div class="stock-record-heading" aria-label="資料儲存控制">
+    <div class="stock-record-heading workspace-controls" aria-label="資料儲存控制">
       <div><strong>資料儲存</strong><p class="backtest-note">保存在目前瀏覽器，重新開啟會還原；尚未送出的表單內容不包含在儲存範圍。</p></div>
       <div class="panel-header-actions">
         <label><input type="checkbox" [checked]="autoSaveEnabled()" (change)="autoSaveEnabled.set($any($event.target).checked)" /> 自動儲存</label>
@@ -40,6 +40,8 @@
     <p class="save-status" role="status">{{ hasUnsavedChanges() ? (autoSaveEnabled() ? '有變更，將自動儲存…' : '有尚未儲存的變更') : (saveStatus() || '資料已儲存') }}</p>
     @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p> }
     @if (backupStatus()) { <p class="record-status" role="status">{{ backupStatus() }}</p> }
+    <details class="export-settings">
+    <summary>預設單 Excel 匯出 <span>{{ excelPreview().count }} 筆可匯出</span></summary>
     <div class="stock-record-heading" aria-label="預設單 Excel 匯出設定">
       <div><strong>預設單 Excel</strong><p class="backtest-note">每個價位各列一筆，買進與賣出分開統計；金額未含交易成本。</p></div>
       <div class="panel-header-actions">
@@ -51,6 +53,7 @@
     <p class="record-status" role="status">{{ excelPreview().count }} 筆 · {{ excelPreview().symbols }} 檔股票 · 買進委託金額 {{ excelPreview().buyAmount | number:'1.0-0' }} 元 · 賣出委託金額 {{ excelPreview().sellAmount | number:'1.0-0' }} 元</p>
     @if (excelPreview().unknownExpiry) { <p class="backtest-note">{{ excelPreview().unknownExpiry }} 筆未設定有效日期，無法判定是否過期，仍會匯出。</p> }
     @if (!excelPreview().count) { <p class="record-empty">目前範圍沒有可匯出的預設單，可切換股票範圍、勾選包含過期單，或先建立預設單。</p> }
+    </details>
     <div class="stock-record-heading">
       <div><span class="eyebrow">多檔股票</span><h2 id="stock-record-title">股票記錄</h2></div>
       <div class="stock-record-add"><input type="text" inputmode="numeric" maxlength="6" aria-label="股票代號" placeholder="輸入股票代號，例如 2317" [value]="recordSymbolInput()" (input)="recordSymbolInput.set($any($event.target).value)" (keydown.enter)="addStockRecord()" /><button type="button" [disabled]="!!recordQuoteLoading()" (click)="addStockRecord()">{{ recordQuoteLoading() ? '查詢中…' : '＋ 新增／切換股票' }}</button></div>
@@ -178,7 +181,13 @@
         @if (liveLoading()) { <p role="status">盤中行情更新中…</p> }
         @if (liveStatus()) { <p role="status">{{ liveStatus() }}</p> }
         @if (historyError()) { <p class="error-text" role="alert">{{ historyError() }}</p> }
+        <div class="chart-range" role="group" aria-label="指標顯示設定">
+          <button type="button" class="chart-range-button" [class.active]="chartIndicators().obv" [attr.aria-pressed]="chartIndicators().obv" (click)="toggleChartIndicator('obv')">OBV</button>
+          <button type="button" class="chart-range-button" [class.active]="chartIndicators().adl" [attr.aria-pressed]="chartIndicators().adl" (click)="toggleChartIndicator('adl')">A/D 累積線</button>
+          <button type="button" class="chart-range-button" [class.active]="chartIndicators().histogram" [attr.aria-pressed]="chartIndicators().histogram" (click)="toggleChartIndicator('histogram')">A/D 紅綠棒</button>
+        </div>
         @for (indicator of indicatorCharts(); track indicator.key) {
+          @if (chartIndicators()[indicator.key]) {
           <div class="chart-section-label volume-label"><span>{{ indicator.label }}</span><em>{{ indicator.latest === null ? '無資料' : (indicator.latest | number:'1.0-0') }}</em></div>
           @if (indicator.change !== null) {
             <p class="backtest-note">較前一交易日：<span [class.positive]="indicator.change > 0" [class.negative]="indicator.change < 0">{{ indicator.change > 0 ? '+' : '' }}{{ indicator.change | number:'1.0-0' }}</span></p>
@@ -189,8 +198,10 @@
             <text x="18" y="138" class="chart-axis-label">{{ indicator.min | number:'1.0-0' }}</text>
             <path [attr.d]="indicator.path" fill="none" [attr.stroke]="indicator.key === 'obv' ? '#60a5fa' : '#c084fc'" stroke-width="2"></path>
           </svg>
+          }
         }
         @if (indicatorStartDate()) {
+          @if (chartIndicators().histogram) {
           <div class="chart-section-label volume-label"><span>A/D 每日收集／派發</span><em>紅：增加・綠：減少</em></div>
           <svg viewBox="0 0 760 140" class="volume-chart" role="img" aria-label="A/D 每日增減紅綠柱狀圖">
             <line x1="18" y1="70" x2="742" y2="70" class="chart-grid-line"></line>
@@ -205,6 +216,7 @@
             }
           </svg>
           <p class="backtest-note">柱狀圖為當日 A/D 增減值；高低價相同或增減為 0 時顯示灰線。</p>
+          }
           <p class="backtest-note">日線指標・成交量單位：股。以 {{ indicatorStartDate() }} 為累積起點（歷史最多 120 個交易日），OBV 起始為 0。切換顯示天數不重設累積值。盤中數值尚未定案；啟用更新時以當日累計成交量重算。</p>
         }
         <div class="chart-section-label volume-label"><span>成交量</span><em>Volume</em></div>
@@ -335,6 +347,7 @@
         </div>
 
         <div class="board-form">
+          <span class="section-eyebrow">委託規劃工作區</span>
           <div class="order-mode-switch" role="group" aria-label="下單模式">
             <button type="button" [class.active]="orderEntryMode() === 'holding'" (click)="changeOrderMode('holding')">記錄已有持倉</button>
             <button type="button" [class.active]="orderEntryMode() === 'preset'" (click)="changeOrderMode('preset')">規劃預設單</button>
@@ -446,6 +459,7 @@
 
       <section class="preset-order-list" aria-labelledby="fill-history-title">
         <div class="preset-list-title"><h3 id="fill-history-title">預設單成交紀錄</h3>
+          <button type="button" class="ghost-button" [disabled]="exportingExcel() || !visiblePresetFills().length" (click)="exportPresetOrdersExcel(true)">{{ exportingExcel() ? 'Excel 產生中…' : '匯出成交紀錄（' + visiblePresetFills().length + ' 筆）' }}</button>
           <label>顯示範圍 <select [value]="fillHistoryScope()" (change)="fillHistoryScope.set($any($event.target).value)"><option value="current">目前股票</option><option value="all">全部股票</option></select></label>
         </div>
         <p class="backtest-note">依你手動確認的成交回報記錄，與券商帳務無自動連線。買進後的損益請看持倉，賣出後的損益請看已平倉紀錄。舊版成交無法自動補回此清單。</p>

@@ -144,6 +144,10 @@ export class App {
   protected readonly todayDate = computed(() => this.todayInputValue());
   protected readonly historyLoading = signal(false);
   protected readonly historyError = signal('');
+  protected readonly chartIndicators = signal({ obv: true, adl: true, histogram: true });
+  protected toggleChartIndicator(key: 'obv' | 'adl' | 'histogram'): void {
+    this.chartIndicators.update(value => ({ ...value, [key]: !value[key] }));
+  }
   protected readonly indicatorStartDate = computed(() => this.indicatorHistory()[0]?.date ?? '');
   private readonly volumeIndicatorSeries = computed(() => calculateVolumeIndicators(this.indicatorHistory()));
   protected readonly hoveredIndicators = computed(() => this.volumeIndicatorSeries().find(point => point.date === this.tooltip()?.date));
@@ -333,24 +337,26 @@ export class App {
     };
   });
 
-  protected async exportPresetOrdersExcel(): Promise<void> {
+  protected async exportPresetOrdersExcel(historyOnly = false): Promise<void> {
     const orders = this.excelOrders();
-    if (this.exportingExcel() || !orders.length) return;
-    const scope = this.excelScope() === 'all' ? '全部股票' : this.stockSymbol();
+    const fills = this.visiblePresetFills();
+    if (this.exportingExcel() || (historyOnly ? !fills.length : !orders.length)) return;
+    const scope = (historyOnly ? this.fillHistoryScope() : this.excelScope()) === 'all' ? '全部股票' : this.stockSymbol();
     const filterDescription = `${scope}；${this.excelIncludeExpired() ? '包含過期單' : '排除已知過期單'}；判斷日期 ${this.todayDate()}`;
     this.exportingExcel.set(true);
     this.backupStatus.set('');
     try {
-      const { buildPresetOrderWorkbook } = await import('./services/preset-order-export');
-      const book = await buildPresetOrderWorkbook(orders, Object.fromEntries(this.stockRecords().map(record => [record.symbol, record.name])), filterDescription);
+      const { buildPresetOrderWorkbook, buildFillHistoryWorkbook } = await import('./services/preset-order-export');
+      const names = Object.fromEntries(this.stockRecords().map(record => [record.symbol, record.name]));
+      const book = historyOnly ? await buildFillHistoryWorkbook(fills, names) : await buildPresetOrderWorkbook(orders, names, filterDescription);
       const data = await book.xlsx.writeBuffer();
       const url = URL.createObjectURL(new Blob([new Uint8Array(data)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `預設單規劃-${scope}-${this.todayInputValue()}.xlsx`;
+      link.download = `${historyOnly ? '實際成交紀錄' : '預設單規劃'}-${scope}-${this.todayInputValue()}.xlsx`;
       document.body.appendChild(link);
       try { link.click(); } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-      this.backupStatus.set('已送出預設單 Excel 下載，包含明細、布局總覽及使用說明。');
+      this.backupStatus.set(historyOnly ? '已送出實際成交紀錄 Excel 下載。' : '已送出預設單 Excel 下載，包含明細、布局總覽及使用說明。');
     } catch {
       this.backupStatus.set('Excel 匯出失敗，請稍後重試。');
     } finally {
@@ -361,7 +367,7 @@ export class App {
   private readonly workspaceContent = computed(() => JSON.stringify({
     stockSymbol: this.stockSymbol(), stockName: this.stockName(), stockRecords: this.stockRecords(),
     latestPrices: this.latestPrices(), tradePositions: this.tradePositions(), presetOrders: this.presetOrders(),
-    closedTrades: this.closedTrades(), presetFills: this.presetFills(), availableCash: this.availableCash(), maxRiskPerTrade: this.maxRiskPerTrade(),
+    closedTrades: this.closedTrades(), presetFills: this.presetFills(), chartIndicators: this.chartIndicators(), availableCash: this.availableCash(), maxRiskPerTrade: this.maxRiskPerTrade(),
     maxStockWeight: this.maxStockWeight(), feeDiscount: this.feeDiscount(),
   }));
   protected readonly hasUnsavedChanges = computed(() => this.workspaceContent() !== this.savedWorkspaceContent());
@@ -1469,6 +1475,12 @@ export class App {
       const raw = localStorage.getItem(this.workspaceStorageKey);
       if (!raw) return;
       const saved = JSON.parse(raw) as Record<string, unknown>;
+      const indicators = saved['chartIndicators'] as Record<string, unknown> | undefined;
+      if (indicators && typeof indicators === 'object') this.chartIndicators.update(defaults => ({
+        obv: typeof indicators['obv'] === 'boolean' ? indicators['obv'] : defaults.obv,
+        adl: typeof indicators['adl'] === 'boolean' ? indicators['adl'] : defaults.adl,
+        histogram: typeof indicators['histogram'] === 'boolean' ? indicators['histogram'] : defaults.histogram,
+      }));
       if (Array.isArray(saved['stockRecords'])) this.stockRecords.set(saved['stockRecords'] as StockRecord[]);
       if (Array.isArray(saved['tradePositions'])) this.tradePositions.set(saved['tradePositions'] as TradePosition[]);
       if (Array.isArray(saved['presetOrders'])) this.presetOrders.set(saved['presetOrders'] as PresetOrder[]);

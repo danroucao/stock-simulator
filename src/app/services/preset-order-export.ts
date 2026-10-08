@@ -1,4 +1,35 @@
-import { PresetOrder } from '../models/trade-position.model';
+import { PresetOrder, PresetFill } from '../models/trade-position.model';
+
+export async function buildFillHistoryWorkbook(fills: PresetFill[], names: Record<string, string>) {
+  const { Workbook } = await import('exceljs');
+  const book = new Workbook();
+  book.creator = 'Stock Trading Simulator';
+  book.created = new Date();
+  const sheet = book.addWorksheet('實際成交紀錄');
+  sheet.columns = [['成交日期', 14], ['股票代號', 12], ['名稱', 16], ['方向', 10], ['交易方式', 12], ['原委託價', 14], ['成交價', 14], ['成交股數', 14], ['成交金額', 18], ['價差（成交－委託）', 22], ['本次後剩餘股數', 20], ['原單編號', 34], ['紀錄時間（台北）', 26], ['備註', 30]].map(([header, width]) => ({ header: String(header), width: Number(width) }));
+  const sorted = [...fills].sort((a, b) => a.date.localeCompare(b.date) || a.recordedAt.localeCompare(b.recordedAt));
+  for (const fill of sorted) {
+    const row = sheet.addRow([fill.date, fill.symbol, names[fill.symbol] || '', fill.action === 'sell' ? '賣出' : '買進', fill.type, fill.plannedPrice, fill.price, fill.shares, null, null, fill.remainingShares, fill.orderId,
+      new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(fill.recordedAt)), fill.note]);
+    row.getCell(9).value = { formula: `G${row.number}*H${row.number}`, result: fill.price * fill.shares };
+    row.getCell(10).value = { formula: `G${row.number}-F${row.number}`, result: fill.price - fill.plannedPrice };
+    for (const col of [6, 7, 9, 10]) row.getCell(col).numFmt = '#,##0.00;[Red]-#,##0.00';
+    for (const col of [8, 11]) row.getCell(col).numFmt = '#,##0';
+  }
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  sheet.autoFilter = { from: 'A1', to: `N${Math.max(sheet.rowCount, 1)}` };
+  sheet.getRow(1).eachCell(cell => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF17324D' } };
+  });
+  sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  const help = book.addWorksheet('使用說明');
+  help.getColumn(1).width = 110;
+  help.addRow(['僅含所選範圍內手動確認的成交；每次部分成交獨立一列。']);
+  help.addRow(['成交金額未含交易成本；成交與委託的價差不是損益。持倉及已平倉損益請回網站查看。']);
+  help.addRow(['本次後剩餘股數是該次成交時的快照，後續成交或取消不會改寫此值。']);
+  return book;
+}
 
 export async function buildPresetOrderWorkbook(orders: PresetOrder[], names: Record<string, string>, filterDescription = '全部記錄') {
   const { Workbook } = await import('exceljs');

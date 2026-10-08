@@ -17,6 +17,21 @@
   gap: 20px;
 }
 
+button, input, select, a { transition: border-color .15s, background .15s; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid #7fd1ff; outline-offset: 3px; }
+input[type='checkbox'] { accent-color: #7fd1ff; width: 17px; height: 17px; }
+[id] { scroll-margin-top: 20px; }
+.export-settings { margin: 16px 0 22px; padding: 14px; border: 1px solid #29425f; border-radius: 12px; background: #0c1b30; }
+.export-settings summary { cursor: pointer; font-weight: 600; }
+.export-settings summary span { color: #9db0d6; font-size: .8rem; margin-left: 10px; }
+.export-settings[open] summary { margin-bottom: 18px; }
+.workspace-controls .panel-header-actions { flex-wrap: wrap; }
+.workspace-controls label, .export-settings label { display: flex; align-items: center; gap: 8px; }
+.export-settings select, .preset-list-title select { background: #10233d; color: #e6edf9; border: 1px solid #36506e; padding: 8px; border-radius: 8px; }
+.hero-card nav { grid-column: 1 / -1; flex-wrap: wrap; }
+.hero-card nav a { text-decoration: none; padding: 10px 16px; }
+
 .dashboard *, .panel, .board-layout > *, .simulator-grid > * { min-width: 0; }
 
 .hero-card,
@@ -618,4 +633,26 @@
   .holding-center-toolbar { align-items:flex-start;flex-direction:column }.holding-view-switch { width:100% }.holding-view-switch button { flex:1 }
   .future-layout .field-grid,.future-layout-results { grid-template-columns:1fr }
   .closed-trade-list>div { grid-template-columns:1fr 1fr }
+}
+
+.board-form { border: 1px solid #29425f; }
+.board-form .order-mode-switch { margin-top: 12px; }
+.board-form .record-status { padding: 12px; border-radius: 10px; background: #10233d; line-height: 1.7; }
+.preset-order-row { display: flex; flex-wrap: wrap; gap: 12px 16px; padding: 18px; line-height: 1.6; }
+.preset-order-row > strong { font-size: .85rem; }
+.preset-order-row > .field-grid, .preset-order-row > p { flex-basis: 100%; }
+.preset-order-row > button { padding: 9px 12px; }
+.preset-list-title { flex-wrap: wrap; align-items: center; }
+.stress-table th { white-space: nowrap; }
+@media (max-width: 900px) {
+  .preset-order-row > span:not(.preset-status) { display: inline; }
+  .workspace-controls { align-items: stretch; flex-direction: column; }
+  .workspace-controls .panel-header-actions { margin-left: 0; }
+}
+@media (max-width: 640px) {
+  .preset-order-row { padding: 14px; gap: 10px; }
+  .preset-order-row > button { flex: 1 1 42%; }
+  .hero-card nav a { flex: 1 1 35%; text-align: center; }
+  .export-settings .panel-header-actions { flex-wrap: wrap; margin-left: 0; }
+  .panel-header, .chart-toolbar { flex-wrap: wrap; }
 }
