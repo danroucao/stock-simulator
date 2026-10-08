@@ -6,7 +6,7 @@ import { planningReference } from './services/planning-reference';
 import { compareDailyReturns } from './services/return-analysis';
 import { forkJoin } from 'rxjs';
 import { simulatePlannedTrade } from './services/planned-trade-simulation';
-import { isTradingDate, hasTradingCalendar } from './services/trading-calendar';
+import { isTradingDate, hasTradingCalendar, latestTradingDate } from './services/trading-calendar';
 import { Component, computed, signal, DestroyRef, inject, effect, untracked, afterNextRender, Injector } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
@@ -120,6 +120,8 @@ export class App {
   protected readonly recordQuoteError = signal('');
   protected readonly pendingStockRecordDelete = signal<string | null>(null);
   protected readonly requestedDate = signal(this.todayInputValue());
+  protected readonly effectiveMarketDate = computed(() => latestTradingDate(this.requestedDate()));
+  protected readonly canUpdateIntraday = computed(() => this.requestedDate() === this.todayDate() && isTradingDate(this.todayDate()));
   protected readonly chartDays = signal(20);
   protected readonly limitUpPrice = signal(685);
   protected readonly limitDownPrice = signal(610);
@@ -1269,6 +1271,8 @@ export class App {
   }
 
   protected toggleLive(): void {
+    if (this.requestedDate() !== this.todayDate()) { this.liveStatus.set('歷史日期查詢：暫停盤中更新'); return; }
+    if (!isTradingDate(this.todayDate())) { this.liveStatus.set('今日休市，暫停盤中更新'); return; }
     this.liveEnabled.update(value => !value);
     ++this.liveRequestId;
     this.liveLoading.set(false);
@@ -1278,6 +1282,10 @@ export class App {
 
   private refreshIntraday(): void {
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    if (!isTradingDate(today)) {
+      this.liveStatus.set('今日休市，暫停盤中更新');
+      return;
+    }
     if (this.requestedDate() !== today) {
       this.liveStatus.set('歷史日期查詢：暫停盤中更新');
       return;

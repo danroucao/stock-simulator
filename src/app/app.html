@@ -192,7 +192,7 @@
         <div class="chart-toolbar">
           <button type="button" class="chart-range-button" [disabled]="isLoadingQuote() || historyLoading()" (click)="loadCurrentPrice()">{{ isLoadingQuote() || historyLoading() ? '載入中…' : '重新整理行情' }}</button>
           @if (requestedDate() !== todayDate()) { <button type="button" class="chart-range-button" (click)="returnToToday()">回到今天</button> }
-          <button type="button" class="chart-range-button" [class.active]="liveEnabled()" (click)="toggleLive()" [attr.aria-pressed]="liveEnabled()">{{ liveEnabled() ? '停止盤中更新' : '啟用盤中更新' }}</button>
+          <button type="button" class="chart-range-button" [disabled]="!canUpdateIntraday()" [class.active]="liveEnabled() && canUpdateIntraday()" (click)="toggleLive()" [attr.aria-pressed]="liveEnabled() && canUpdateIntraday()">{{ !canUpdateIntraday() ? '盤中更新暫停' : liveEnabled() ? '停止盤中更新' : '啟用盤中更新' }}</button>
           <label class="field compact chart-date-field">
             <span>查詢日期</span>
             <input type="date" [max]="todayDate()" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
@@ -209,6 +209,7 @@
       </div>
 
       <div class="chart-wrap">
+        @if (effectiveMarketDate() !== requestedDate()) { <p role="status">{{ displayDate(requestedDate()) }} 休市，查詢截至 {{ displayDate(effectiveMarketDate()) }} 的最近交易日資料；盤中更新暫停。</p> }
         @if (historyError()) { <p class="error-text" role="alert">{{ historyError() }}</p> }
         @if (isLoadingQuote() || historyLoading()) { <p role="status">{{ isLoadingQuote() ? '正在取得報價…' : '正在載入歷史圖表…' }}</p> }
         @if (priceAlertMessage()) { <p class="portfolio-warning" role="status">{{ priceAlertMessage() }}（依最近取得行情）</p> }

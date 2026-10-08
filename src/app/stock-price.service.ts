@@ -1,5 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
+import { latestTradingDate } from './services/trading-calendar';
 import { Observable, catchError, forkJoin, map, of, switchMap, timeout, retry, timer, throwError } from 'rxjs';
 
 interface TwseStockResponse {
@@ -66,6 +67,7 @@ export class StockPriceService {
 
   getLatestQuote(symbol: string, requestDate?: string): Observable<StockQuote | null> {
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    requestDate = latestTradingDate(requestDate || today);
     if (!requestDate || requestDate === today) {
       return this.getIntradayQuote(symbol).pipe(switchMap(quote =>
         quote && quote.date <= today.replaceAll('-', '') ? of(quote) : this.getDailyQuote(symbol, requestDate),
@@ -98,6 +100,8 @@ export class StockPriceService {
   }
 
   getHistory(symbol: string, days = 30, requestDate?: string): Observable<StockHistoryPoint[]> {
+    const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    requestDate = latestTradingDate(requestDate || today);
     const normalizedSymbol = symbol.replace(/\D/g, '');
     if (!normalizedSymbol) {
       return of([]);

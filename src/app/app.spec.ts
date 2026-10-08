@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
+afterEach(() => vi.useRealTimers());
 
 import { App } from './app';
 import { StockPriceService } from './stock-price.service';
@@ -399,6 +400,7 @@ describe('App', () => {
     expect(app.isLoadingQuote()).toBe(true);
   });
   function setupLive() {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-08T04:00:00Z'));
     const app = TestBed.createComponent(App).componentInstance as any;
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
     const date = `${Number(today.slice(0, 4)) - 1911}/${today.slice(5, 7)}/${today.slice(8, 10)}`;

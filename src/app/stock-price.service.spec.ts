@@ -1,4 +1,6 @@
 import { of, defer, firstValueFrom, throwError } from 'rxjs';
+import { vi } from 'vitest';
+afterEach(() => vi.useRealTimers());
 
 import { StockPriceService } from './stock-price.service';
 
@@ -10,6 +12,7 @@ function row(rocDate: string, close = 100): Row {
 
 describe('StockPriceService history', () => {
   it('uses MIS quotes for an explicit Taipei today query without waiting for history', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-08T04:00:00Z'));
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
     const urls: string[] = [];
     const service = new StockPriceService({ get: (url: string) => {
@@ -70,11 +73,12 @@ describe('StockPriceService history', () => {
     service.getHistory('2330', 60, '2026-08-01').subscribe();
     const twseRequests = requestedUrls.filter((url) => url.includes('STOCK_DAY'));
     expect(twseRequests.length).toBe(5);
-    expect(twseRequests[0]).toContain('date=20260801');
-    expect(twseRequests.at(-1)).toContain('date=20260401');
+    expect(twseRequests[0]).toContain('date=20260701');
+    expect(twseRequests.at(-1)).toContain('date=20260301');
   });
 
   it('falls back to TPEx quotes when a symbol is not listed on TWSE', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-08T04:00:00Z'));
     const service = new StockPriceService({
       get: (url: string) => url.includes('/api/quote')
         ? of({ msgArray: [{ c:'6182',n:'合晶',d:'20260731',z:'89.00',y:'84.70',o:'92.90',h:'93.10',l:'84.00',v:'27336' }] })

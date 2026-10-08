@@ -13,3 +13,13 @@ export function isTradingDate(value: string): boolean {
   return date.getUTCDay() !== 0 && date.getUTCDay() !== 6 && !closed.has(value);
 }
 export function hasTradingCalendar(value: string): boolean { return calendarYears.includes(Number(value.slice(0, 4))); }
+export function latestTradingDate(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return value;
+  for (let offset = 0; offset < 366; offset++) {
+    const candidate = date.toISOString().slice(0, 10);
+    if (isTradingDate(candidate)) return candidate;
+    date.setUTCDate(date.getUTCDate() - 1);
+  }
+  return value;
+}
