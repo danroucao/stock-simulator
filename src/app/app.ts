@@ -144,6 +144,28 @@ export class App {
   protected readonly indicatorStartDate = computed(() => this.indicatorHistory()[0]?.date ?? '');
   private readonly volumeIndicatorSeries = computed(() => calculateVolumeIndicators(this.indicatorHistory()));
   protected readonly hoveredIndicators = computed(() => this.volumeIndicatorSeries().find(point => point.date === this.tooltip()?.date));
+  protected readonly adlDailyPoints = computed(() => {
+    const series = this.volumeIndicatorSeries();
+    return series.map((point, index) => ({ date: point.date, value: point.adl - (series[index - 1]?.adl ?? 0) })).slice(-this.chartDays());
+  });
+  protected readonly hoveredAdlChange = computed(() => this.adlDailyPoints().find(point => point.date === this.tooltip()?.date)?.value);
+  protected readonly adlHistogram = computed(() => {
+    const points = this.adlDailyPoints();
+    const scale = Math.max(...points.map(point => Math.abs(point.value)), 1);
+    const interval = 724 / Math.max(points.length, 1);
+    return {
+      scale,
+      bars: points.map((point, index) => {
+        const height = Math.abs(point.value) / scale * 52;
+        return {
+          ...point, x: 18 + (index + 0.2) * interval, width: interval * 0.6,
+          y: point.value > 0 ? 70 - height : point.value < 0 ? 70 : 69.5,
+          height: point.value === 0 ? 1 : height,
+          fill: point.value > 0 ? '#ff6268' : point.value < 0 ? '#38d996' : '#a9b6c9',
+        };
+      }),
+    };
+  });
   protected readonly indicatorCharts = computed(() => {
     const series = this.volumeIndicatorSeries();
     const points = series.slice(-this.chartDays());
