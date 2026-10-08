@@ -64,6 +64,16 @@ export class StockPriceService {
   }
 
   getLatestQuote(symbol: string, requestDate?: string): Observable<StockQuote | null> {
+    const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    if (!requestDate || requestDate === today) {
+      return this.getIntradayQuote(symbol).pipe(switchMap(quote =>
+        quote && quote.date <= today.replaceAll('-', '') ? of(quote) : this.getDailyQuote(symbol, requestDate),
+      ));
+    }
+    return this.getDailyQuote(symbol, requestDate);
+  }
+
+  private getDailyQuote(symbol: string, requestDate?: string): Observable<StockQuote | null> {
     const normalizedSymbol = symbol.replace(/\D/g, '');
     if (!normalizedSymbol) {
       return of(null);
@@ -74,6 +84,7 @@ export class StockPriceService {
     return this.http
       .get<TwseStockResponse>(`${this.requestUrl}?response=json&date=${normalizedDate}&stockNo=${normalizedSymbol}`)
       .pipe(
+        timeout(10000),
         map((response) => this.mapQuote(response, requestDate)),
         catchError(() => of(null)),
         switchMap((quote) => quote ? of(quote) : this.getTpexHistory(normalizedSymbol, 1, requestDate).pipe(
@@ -94,7 +105,7 @@ export class StockPriceService {
     const requests = this.buildHistoryRequestDates(requestDate, days).map((date) =>
       this.http
         .get<TwseStockResponse>(`${this.requestUrl}?response=json&date=${date}&stockNo=${normalizedSymbol}`)
-        .pipe(catchError(() => of({ data: [] } as TwseStockResponse))),
+        .pipe(timeout(10000), catchError(() => of({ data: [] } as TwseStockResponse))),
     );
 
     return forkJoin(requests).pipe(
@@ -116,6 +127,7 @@ export class StockPriceService {
     return this.http.get<FinMindHistoryResponse>(
       `${this.tpexProxyUrl}/api/history?symbol=${symbol}&start_date=${formatDate(start)}&end_date=${formatDate(target)}`,
     ).pipe(
+      timeout(15000),
       map((response) => (response.data ?? [])
         .filter((row) => row.stock_id === symbol)
         .map((row) => {

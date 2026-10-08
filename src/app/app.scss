@@ -27,6 +27,7 @@ input[type='checkbox'] { accent-color: #7fd1ff; width: 17px; height: 17px; }
 .export-settings summary span { color: #9db0d6; font-size: .8rem; margin-left: 10px; }
 .export-settings[open] summary { margin-bottom: 18px; }
 .workspace-controls .panel-header-actions { flex-wrap: wrap; }
+.workspace-controls + .save-status { margin: 12px 0; padding-top: 10px; border-top: 1px solid #29425f; text-align: left; line-height: 1.7; }
 .workspace-controls label, .export-settings label { display: flex; align-items: center; gap: 8px; }
 .export-settings select, .preset-list-title select { background: #10233d; color: #e6edf9; border: 1px solid #36506e; padding: 8px; border-radius: 8px; }
 .hero-card nav { grid-column: 1 / -1; flex-wrap: wrap; }

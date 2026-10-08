@@ -9,6 +9,20 @@ function row(rocDate: string, close = 100): Row {
 }
 
 describe('StockPriceService history', () => {
+  it('uses MIS quotes for an explicit Taipei today query without waiting for history', () => {
+    const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const urls: string[] = [];
+    const service = new StockPriceService({ get: (url: string) => {
+      urls.push(url);
+      return of({ msgArray: [{ c: '6182', n: '合晶', d: today.replaceAll('-', ''), z: '129', y: '135', o: '132', h: '133', l: '125.5', v: '59848' }] });
+    } } as any);
+    service.getLatestQuote('6182', today).subscribe(quote => {
+      expect(quote?.close).toBe(129);
+      expect(quote?.name).toBe('合晶');
+    });
+    expect(urls.length).toBe(1);
+    expect(urls[0]).toContain('/api/quote');
+  });
   it('never selects a TWSE price later than the requested historical date', () => {
     const service = new StockPriceService({ get: () => of({}) } as any);
     const quote = (service as any).mapQuote({ data: [row('115/10/05', 100), row('115/10/08', 120)] }, '2026-10-06');

@@ -10,21 +10,22 @@
     <div class="summary-grid">
       <div class="summary-item accent">
         <span>目標股票</span>
-        <strong>{{ stockSymbol() }} · {{ stockName() }}</strong>
+        <strong>{{ stockSymbol() }} · {{ stockName() || '名稱待取得' }}</strong>
       </div>
       <div class="summary-item">
-        <span>最新市價</span>
-        <strong>{{ latestPrice() | number: '1.0-0' }}</strong>
+        <span>{{ isLoadingQuote() ? '行情載入中' : quoteError() ? '行情更新失敗' : '最新市價' }}</span>
+        <strong>{{ latestPrice() > 0 ? (latestPrice() | number: '1.0-2') : '—' }}</strong>
       </div>
       <div class="summary-item">
         <span>資料日期</span>
-        <strong>{{ quoteDate() || requestedDate() }}</strong>
+        <strong>{{ quoteDate() || '尚未取得' }}</strong>
       </div>
       <div class="summary-item">
         <span>長線 ROI</span>
         <strong>{{ longTermRoi() | number: '1.2-2' }}%</strong>
       </div>
     </div>
+    @if (quoteError()) { <p class="error-text" role="alert">{{ quoteError() }} {{ latestPrice() > 0 ? '目前顯示上次取得的價格。' : '' }} <button type="button" class="ghost-button" [disabled]="isLoadingQuote()" (click)="loadCurrentPrice()">重新取得行情</button></p> }
     <nav class="chart-range" aria-label="操作流程捷徑"><a class="chart-range-button" href="#stock-record-title">1 選擇股票</a><a class="chart-range-button" href="#market-chart">2 查看行情</a><a class="chart-range-button" href="#strategy-board">3 建立持倉／預設單</a><a class="chart-range-button" href="#holdings-center">4 查看持倉</a></nav>
   </section>
 
