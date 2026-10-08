@@ -188,7 +188,7 @@
           <button type="button" class="chart-range-button" [class.active]="chartIndicators().histogram" [attr.aria-pressed]="chartIndicators().histogram" (click)="toggleChartIndicator('histogram')">A/D 紅綠棒</button>
         </div>
         @for (indicator of indicatorCharts(); track indicator.key) {
-          @if (chartIndicators()[indicator.key]) {
+          @if (indicator.key === 'obv' && chartIndicators().obv) {
           <div class="chart-section-label volume-label"><span>{{ indicator.label }}</span><em>{{ indicator.latest === null ? '無資料' : (indicator.latest | number:'1.0-0') }}</em></div>
           @if (indicator.change !== null) {
             <p class="backtest-note">較前一交易日：<span [class.positive]="indicator.change > 0" [class.negative]="indicator.change < 0">{{ indicator.change > 0 ? '+' : '' }}{{ indicator.change | number:'1.0-0' }}</span></p>
@@ -202,9 +202,10 @@
           }
         }
         @if (indicatorStartDate()) {
-          @if (chartIndicators().histogram) {
-          <div class="chart-section-label volume-label"><span>A/D 每日收集／派發</span><em>紅：增加・綠：減少</em></div>
-          <svg viewBox="0 0 760 140" class="volume-chart" role="img" aria-label="A/D 每日增減紅綠柱狀圖">
+          @if (chartIndicators().histogram || chartIndicators().adl) {
+          <div class="chart-section-label volume-label"><span>A/D 收集／派發</span><em>{{ chartIndicators().adl ? '紫線：累積值' : '' }} {{ chartIndicators().histogram ? '紅／綠棒：每日增減' : '' }}</em></div>
+          <svg viewBox="0 0 760 140" class="volume-chart" role="img" aria-label="A/D 累積線與每日增減合併圖">
+            @if (chartIndicators().histogram) {
             <line x1="18" y1="70" x2="742" y2="70" class="chart-grid-line"></line>
             <text x="18" y="14" class="chart-axis-label">+{{ adlHistogram().scale | number:'1.0-0' }}</text>
             <text x="744" y="66" class="chart-axis-label">0</text>
@@ -215,8 +216,15 @@
                 <title>{{ bar.date }} A/D 當日增減：{{ bar.value | number:'1.0-0' }}</title>
               </rect>
             }
+            }
+            @if (chartIndicators().adl) {
+              <text x="742" y="14" text-anchor="end" class="chart-axis-label" fill="#c084fc">{{ adlLineChart().max | number:'1.0-0' }}</text>
+              <text x="742" y="138" text-anchor="end" class="chart-axis-label" fill="#c084fc">{{ adlLineChart().min | number:'1.0-0' }}</text>
+              <path [attr.d]="adlLineChart().path" fill="none" stroke="#c084fc" stroke-width="2" pointer-events="none"></path>
+            }
           </svg>
-          <p class="backtest-note">柱狀圖為當日 A/D 增減值；高低價相同或增減為 0 時顯示灰線。</p>
+          <p class="backtest-note">{{ chartIndicators().histogram ? '左側刻度：每日增減，紅棒增加、綠棒減少，灰線為 0。' : '' }} {{ chartIndicators().adl ? '右側刻度：A/D 累積值。' : '' }} 兩者使用不同刻度，線與棒的交點不代表數值相同。</p>
+          @if (chartIndicators().adl) { <p class="backtest-note">最新累積值 {{ adlLineChart().latest | number:'1.0-0' }} · 當日增減 {{ adlLineChart().change | number:'1.0-0' }}</p> }
           }
           <p class="backtest-note">日線指標・成交量單位：股。以 {{ indicatorStartDate() }} 為累積起點（歷史最多 120 個交易日），OBV 起始為 0。切換顯示天數不重設累積值。盤中數值尚未定案；啟用更新時以當日累計成交量重算。</p>
         }
@@ -269,13 +277,20 @@
 
     <article id="strategy-board" class="panel board-panel" [class.collapsed]="collapsedPanels().has('board')">
       <div class="panel-header">
-        <div><span class="section-eyebrow">短線模擬 × 座標下單</span><h2>近期策略下單板</h2></div>
+        <div><span class="section-eyebrow">短線模擬 × 座標下單</span><h2>{{ stockSymbol() }} · {{ stockName() || '名稱待取得' }} 策略下單板</h2></div>
         <div class="panel-header-actions"><span class="badge">{{ stockSymbol() }} · {{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><button type="button" class="save-workspace-button" (click)="saveWorkspace()">儲存資料</button><button type="button" class="collapse-button" (click)="togglePanel('board')" [attr.aria-expanded]="!collapsedPanels().has('board')" aria-label="收合近期策略下單板">⌃</button></div>
       </div>
       @if (saveStatus()) { <p class="save-status" role="status">{{ saveStatus() }}</p> }
 
       <div class="board-layout">
         <div class="board-visual">
+          <div class="chart-range" role="group" aria-label="座標圖顯示範圍">
+            <button type="button" class="chart-range-button" [class.active]="boardView() === 'all'" [attr.aria-pressed]="boardView() === 'all'" (click)="changeBoardView('all')">全部</button>
+            <button type="button" class="chart-range-button" [class.active]="boardView() === 'positions'" [attr.aria-pressed]="boardView() === 'positions'" (click)="changeBoardView('positions')">持倉（{{ currentStockPositions().length }}）</button>
+            <button type="button" class="chart-range-button" [class.active]="boardView() === 'presets'" [attr.aria-pressed]="boardView() === 'presets'" (click)="changeBoardView('presets')">預設單（{{ currentStockPresetOrders().length }}）</button>
+          </div>
+          <p class="backtest-note">僅顯示 {{ stockSymbol() }}；切換範圍不改變座標刻度或損益計算。</p>
+          @if (!visibleBoardMarkers().length && !visiblePresetMarkers().length) { <p class="record-empty">目前範圍沒有記錄，可在右側表單新增。</p> }
           @if (boardTooltip(); as boardTooltipState) {
             <div class="board-tooltip" [style.left.px]="boardTooltipState.x" [style.top.px]="boardTooltipState.y">
               <div class="tooltip-head">{{ boardTooltipState.position.symbol }} · {{ boardTooltipState.position.type }}</div>
@@ -320,7 +335,7 @@
             <text x="280" y="270" fill="#91a7c9" font-size="10">今天 {{ boardAxis().startLabel }}</text>
             <text x="690" y="270" fill="#91a7c9" font-size="10">{{ boardAxis().endLabel }}</text>
             <text x="475" y="294" fill="#879bbc" font-size="10">近期預設單時間軸</text>
-            @for (marker of boardMarkers(); track marker.id) {
+            @for (marker of visibleBoardMarkers(); track marker.id) {
               <g (click)="selectBoardRecord(marker.id, 'position', marker.x, marker.y)" (dblclick)="editTradePosition(marker.position)">
                 <circle
                   [attr.cx]="marker.x"
@@ -336,7 +351,7 @@
                 <text [attr.x]="marker.x + 12" [attr.y]="marker.y + 6" fill="#8ba1c3" font-size="9">{{ marker.dateLabel }}</text>
               </g>
             }
-            @for (marker of presetMarkers(); track marker.id) {
+            @for (marker of visiblePresetMarkers(); track marker.id) {
               <g class="preset-marker" (click)="selectBoardRecord(marker.id, 'preset', marker.x, marker.y)">
                 <rect [attr.x]="marker.x - 9" [attr.y]="marker.y - 9" width="18" height="18" rx="3" fill="#65d6ff" stroke="#dff7ff" stroke-width="2" stroke-dasharray="3 2" [attr.transform]="'rotate(45 ' + marker.x + ' ' + marker.y + ')'" />
                 <text [attr.x]="marker.x + 14" [attr.y]="marker.y + 17" fill="#91defe" font-size="10">{{ marker.label }}</text>

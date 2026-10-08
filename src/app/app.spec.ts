@@ -6,6 +6,18 @@ import { App } from './app';
 import { StockPriceService } from './stock-price.service';
 
 describe('App', () => {
+  it('filters board markers without changing holdings or the chart scale', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const positions = app.tradePositions();
+    const axis = app.boardAxis();
+    app.changeBoardView('presets');
+    expect(app.visibleBoardMarkers().length).toBe(0);
+    expect(app.tradePositions()).toEqual(positions);
+    expect(app.boardAxis()).toEqual(axis);
+    app.changeBoardView('positions');
+    expect(app.visibleBoardMarkers().length).toBeGreaterThan(0);
+    expect(app.visiblePresetMarkers().length).toBe(0);
+  });
   it('moves partial buy fills into holdings and removes the order only after all shares fill', () => {
     const app = TestBed.createComponent(App).componentInstance as any;
     const date = app.todayDate();

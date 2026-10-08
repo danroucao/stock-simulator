@@ -193,6 +193,7 @@ export class App {
     });
   });
   protected readonly tooltip = signal<ChartTooltip | null>(null);
+  protected readonly adlLineChart = computed(() => this.indicatorCharts().find(chart => chart.key === 'adl')!);
   protected readonly boardTooltip = signal<BoardTooltipState | null>(null);
   protected readonly draggingBoardMarker = signal<string | null>(null);
   protected readonly editingPositionId = signal<string | null>(null);
@@ -211,6 +212,16 @@ export class App {
   protected readonly exportingExcel = signal(false);
   protected readonly orderStatus = signal('');
   protected readonly pendingPresetCancel = signal<string | null>(null);
+  protected readonly boardView = signal<'all' | 'positions' | 'presets'>('all');
+  protected readonly visibleBoardMarkers = computed(() => this.boardView() === 'presets' ? [] : this.boardMarkers());
+  protected readonly visiblePresetMarkers = computed(() => this.boardView() === 'positions' ? [] : this.presetMarkers());
+  protected changeBoardView(view: 'all' | 'positions' | 'presets'): void {
+    this.boardView.set(view);
+    this.boardTooltip.set(null);
+    this.selectedBoardRecord.set(null);
+    this.pendingBoardRecordDelete.set(null);
+    this.draggingBoardMarker.set(null);
+  }
   protected readonly fillOrderId = signal<string | null>(null);
   protected readonly fillPrice = signal(0);
   protected readonly fillShares = signal(0);
