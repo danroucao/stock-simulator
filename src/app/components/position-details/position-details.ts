@@ -14,6 +14,7 @@ export class PositionDetails {
   readonly positions = input.required<TradePosition[]>();
   readonly currentSymbol = input.required<string>();
   readonly latestPrice = input.required<number>();
+  readonly quoteUpdating = input(false);
   readonly fallbackPrice = input.required<number>();
   readonly pricesBySymbol = input<Record<string, number>>({});
   readonly feeDiscount = input(1);
@@ -82,6 +83,10 @@ export class PositionDetails {
     const positions = this.positions().filter(position => position.symbol === symbol);
     const shares = positions.reduce((sum, position) => sum + position.shares, 0);
     return shares > 0 ? positions.reduce((sum, position) => sum + position.entryPrice * position.shares, 0) / shares : 0;
+  }
+
+  protected hasQuote(symbol: string): boolean {
+    return this.pricesBySymbol()[symbol] > 0 || (symbol === this.currentSymbol() && this.latestPrice() > 0);
   }
 
   protected cost(position: TradePosition): number {

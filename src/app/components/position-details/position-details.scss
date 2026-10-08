@@ -1,4 +1,6 @@
 :host { display: block; }
+.quote-updating .position-group-header > span:nth-child(n+4) strong,
+.quote-updating .position-profit-table tbody tr:not(.inline-edit-row):not(.position-actions-row) td:nth-child(n+5) { visibility: hidden; }
 .position-detail-section { margin-top:24px;padding-top:22px;border-top:1px solid rgba(128,161,213,.2) }
 .detail-section-heading { display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px }
 .detail-section-heading h3 { margin:4px 0 0;font-size:1rem }.detail-section-heading>span { color:#8198be;font-size:.76rem }.section-eyebrow { color:#68c9ff;font-size:.7rem;letter-spacing:.08em }

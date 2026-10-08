@@ -509,7 +509,7 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('#position-detail-title')?.textContent).toContain('持倉筆記與實際盈虧');
+    expect(compiled.querySelector('#position-detail-title')?.textContent).toContain('持倉筆記與未實現損益');
     expect(compiled.querySelectorAll('.position-group').length).toBe(1);
     expect(compiled.querySelectorAll('.position-profit-table tbody .position-actions-row').length).toBe(2);
   });
@@ -837,5 +837,35 @@ describe('App', () => {
     expect(saved.stockSymbol).toBe('6182');
     expect(saved.tradePositions.length).toBe(2);
     expect(saved.version).toBe(1);
+  });
+
+  it('preserves a valid sub-dollar execution price and blocks future holding dates', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.changeOrderMode('holding');
+    app.positionForm.update((form: any) => ({ ...form, entryPrice: 0.5, shares: 1000, stopLossPrice: undefined, targetPrice: 0, tradeDate: app.todayDate() }));
+    app.addTradePosition();
+    expect(app.tradePositions().at(-1).entryPrice).toBe(0.5);
+    const count = app.tradePositions().length;
+    app.positionForm.update((form: any) => ({ ...form, tradeDate: '2999-01-01' }));
+    expect(app.orderFieldError('tradeDate')).toContain('不能晚於今天');
+    app.addTradePosition();
+    expect(app.tradePositions().length).toBe(count);
+  });
+
+  it('prefills sale planning from the selected stock quote and keeps mixed-lot quantities explicit', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const position = { ...app.tradePositions()[0], shares: 1500 };
+    app.latestPrices.set({ [position.symbol]: 123 });
+    app.positionForm.update((form: any) => ({ ...form, entryPrice: 999, stopLossPrice: 900, targetPrice: 1100 }));
+    app.planPositionSale(position);
+    expect(app.positionForm().entryPrice).toBe(123);
+    expect(app.positionForm().shares).toBe(1500);
+    expect(app.positionForm().stopLossPrice).toBeUndefined();
+    expect(app.positionForm().targetPrice).toBe(0);
+    expect(app.orderFieldError('shares')).toContain('1000');
+    app.latestPrices.set({}); app.latestPrice.set(0);
+    app.planPositionSale(position);
+    expect(app.positionForm().entryPrice).toBe(0);
+    expect(app.orderFieldError('entryPrice')).toContain('大於 0');
   });
 });

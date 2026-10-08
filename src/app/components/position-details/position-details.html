@@ -1,21 +1,23 @@
-<section class="position-detail-section" aria-labelledby="position-detail-title">
+<section class="position-detail-section" [class.quote-updating]="quoteUpdating()" [attr.aria-busy]="quoteUpdating()" aria-labelledby="position-detail-title">
   <div class="detail-section-heading">
-    <div><span class="section-eyebrow">持倉模擬面板延伸</span><h3 id="position-detail-title">持倉筆記與實際盈虧</h3></div>
-    <span>已入倉部位依最新股價逐筆計算</span>
+    <div><span class="section-eyebrow">持倉模擬面板延伸</span><h3 id="position-detail-title">持倉筆記與未實現損益</h3></div>
+    <span>未實現損益包含預估出場成本；已平倉結果見已實現交易。</span>
   </div>
 
+  @if (quoteUpdating()) { <p role="status">行情更新中，持倉估值稍後顯示。</p> }
   @for (group of groups(); track group.symbol) {
     <article class="position-group" [class.expanded]="expandedSymbols().has(group.symbol)">
       <button type="button" class="position-group-header" (click)="toggle(group.symbol)" [attr.aria-expanded]="expandedSymbols().has(group.symbol)">
         <span class="group-chevron">›</span>
         <span class="group-symbol"><strong>{{ group.symbol }}</strong><small>{{ group.positions.length }} 筆持倉 · {{ group.shares | number:'1.0-0' }} 股</small></span>
         <span><small>投入成本</small><strong>{{ group.cost | number:'1.0-0' }}</strong></span>
-        <span><small>目前價格</small><strong>{{ marketPriceFor(group.symbol) | number:'1.0-2' }}</strong></span>
-        <span><small>實際盈虧</small><strong [class.positive]="group.profit >= 0" [class.negative]="group.profit < 0">{{ group.profit >= 0 ? '+' : '' }}{{ group.profit | number:'1.0-0' }}</strong></span>
+        <span><small>{{ hasQuote(group.symbol) ? '最近取得價格' : '估算價格（缺行情）' }}</small><strong>{{ marketPriceFor(group.symbol) | number:'1.0-2' }}</strong></span>
+        <span><small>未實現損益</small><strong [class.positive]="group.profit >= 0" [class.negative]="group.profit < 0">{{ group.profit >= 0 ? '+' : '' }}{{ group.profit | number:'1.0-0' }}</strong></span>
       </button>
 
       @if (expandedSymbols().has(group.symbol)) {
         <div class="position-group-body">
+          @if (!hasQuote(group.symbol)) { <p role="status">尚無行情，以下估值暫用持倉加權進場價；取得行情後再核對損益。</p> }
           <div class="position-group-actions">
             @if (pendingDeleteSymbol() === group.symbol) {
               <span>確定刪除 {{ group.symbol }} 的全部 {{ group.positions.length }} 筆持倉記錄？</span>
@@ -26,7 +28,7 @@
             }
           </div>
           <div class="position-profit-table-wrap"><table class="position-profit-table">
-          <thead><tr><th>方向</th><th>股數</th><th>買入價</th><th>投入成本</th><th>目前市值</th><th>實際盈虧</th><th>報酬率</th></tr></thead>
+          <thead><tr><th>方向</th><th>股數</th><th>進場價</th><th>投入成本</th><th>目前市值</th><th>未實現損益</th><th>報酬率</th></tr></thead>
           <tbody>
             @for (position of group.positions; track position.id) {
               <tr>
@@ -37,7 +39,7 @@
               <tr class="inline-edit-row">
                 <td colspan="3"><label>持倉筆記<input type="text" [value]="position.note" (input)="update(position.id, 'note', $any($event.target).value)" placeholder="輸入交易想法或停損條件" /></label></td>
                 <td colspan="2"><label>目標價<input type="number" min="1" [value]="position.targetPrice" (input)="update(position.id, 'targetPrice', +($any($event.target).value || 1))" /></label></td>
-                <td colspan="2"><span class="target-hint">距目標 {{ ((position.targetPrice - marketPriceFor(position.symbol)) / marketPriceFor(position.symbol) * 100) | number:'1.1-1' }}%</span></td>
+                <td colspan="2"><span class="target-hint">{{ quoteUpdating() ? '行情更新中' : !hasQuote(position.symbol) ? '等待行情後計算距目標' : '' }}@if (!quoteUpdating() && hasQuote(position.symbol)) { 距目標 {{ ((position.targetPrice - marketPriceFor(position.symbol)) / marketPriceFor(position.symbol) * 100) | number:'1.1-1' }}% }</span></td>
               </tr>
               <tr class="position-actions-row"><td colspan="7">
                 @if (pendingDeletePositionId() === position.id) {

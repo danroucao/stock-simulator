@@ -6,6 +6,13 @@ function backup() {
     tradePositions: [{ id: 'position', symbol: '2330', type: '現股多單', shares: 100, entryPrice: 100, targetPrice: 110, tradeDate: '2026-02-01', note: '' }] };
 }
 describe('workspace backup validation', () => {
+  it('preserves optional interest rates and rejects invalid values', () => {
+    const data = { ...backup(), financingRate: 6.7, shortBorrowRate: 2.1 };
+    expect(validateWorkspaceBackup(JSON.stringify(data))['financingRate']).toBe(6.7);
+    expect(validateWorkspaceBackup(JSON.stringify(data))['shortBorrowRate']).toBe(2.1);
+    expect(() => validateWorkspaceBackup(JSON.stringify({ ...data, financingRate: -1 }))).toThrow('年費率');
+    expect(() => validateWorkspaceBackup(JSON.stringify({ ...data, shortBorrowRate: '2.1' }))).toThrow('年費率');
+  });
   it('accepts legacy backups and supplies empty optional collections', () => {
     const result = validateWorkspaceBackup(JSON.stringify(backup()));
     expect(result['presetFills']).toEqual([]);

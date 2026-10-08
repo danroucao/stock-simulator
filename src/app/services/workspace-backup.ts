@@ -14,6 +14,9 @@ export function validateWorkspaceBackup(raw: string): Record<string, any> {
     if (!number(saved[key]) || saved[key] < 0) throw new Error('資金或風險設定格式不正確。');
   }
   if (saved.feeDiscount > 1 || saved.maxStockWeight > 100) throw new Error('折數或比重超出範圍。');
+  for (const key of ['financingRate', 'shortBorrowRate']) {
+    if (saved[key] !== undefined && (!number(saved[key]) || saved[key] < 0)) throw new Error('融資或融券年費率須為有效的非負數。');
+  }
   if (!saved.latestPrices || typeof saved.latestPrices !== 'object' || Array.isArray(saved.latestPrices) || Object.entries(saved.latestPrices).some(([symbol, value]) => !/^\d{4,6}$/.test(symbol) || !number(value) || (value as number) < 0)) throw new Error('行情快取格式不正確。');
   for (const key of ['stockRecords', 'tradePositions', 'presetOrders', 'closedTrades', 'presetFills']) {
     if (key === 'presetFills' && saved[key] === undefined) saved[key] = [];

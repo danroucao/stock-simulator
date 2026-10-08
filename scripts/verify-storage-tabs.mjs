@@ -23,5 +23,19 @@ try {
   assert.equal(await right.evaluate(() => JSON.parse(localStorage.getItem('stock-simulator-workspace-v1')).availableCash), 123456);
   await right.getByRole('button', { name: '採用另一分頁資料', exact: true }).click();
   await right.waitForFunction(() => [...document.querySelectorAll('label')].some(label => label.textContent.trim() === '可用現金' && label.querySelector('input')?.value === '123456'));
+  await right.getByText('交易成本模型（自訂假設）', { exact: true }).click();
+  await right.getByLabel('融資年利率（%）', { exact: true }).fill('6.7');
+  await right.getByLabel('融資年利率（%）', { exact: true }).press('Tab');
+  await right.getByLabel('融券年費率（%）', { exact: true }).fill('2.1');
+  await right.getByLabel('融券年費率（%）', { exact: true }).press('Tab');
+  await right.waitForFunction(() => {
+    const saved = JSON.parse(localStorage.getItem('stock-simulator-workspace-v1'));
+    return saved.financingRate === 6.7 && saved.shortBorrowRate === 2.1;
+  });
+  await right.reload();
+  await right.locator('#workspace-settings > details > summary').click();
+  await right.getByText('交易成本模型（自訂假設）', { exact: true }).click();
+  assert.equal(await right.getByLabel('融資年利率（%）', { exact: true }).inputValue(), '6.7');
+  assert.equal(await right.getByLabel('融券年費率（%）', { exact: true }).inputValue(), '2.1');
   console.log('Verified: shared browser tabs detect conflict, block overwrite, and reload chosen workspace');
 } finally { await browser.close(); }

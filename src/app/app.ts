@@ -7,7 +7,7 @@ import { compareDailyReturns } from './services/return-analysis';
 import { forkJoin } from 'rxjs';
 import { simulatePlannedTrade } from './services/planned-trade-simulation';
 import { isTradingDate, hasTradingCalendar } from './services/trading-calendar';
-import { Component, computed, signal, DestroyRef, inject, effect, untracked } from '@angular/core';
+import { Component, computed, signal, DestroyRef, inject, effect, untracked, afterNextRender, Injector } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 
@@ -135,6 +135,32 @@ export class App {
   protected readonly maxRiskPerTrade = signal(10_000);
   protected readonly maxStockWeight = signal(25);
   protected readonly quoteDate = signal('');
+  protected displayDate(value: string | undefined | null): string {
+    if (!value) return '無資料';
+    const match = /^(\d{3,4})[-/]?(\d{2})[-/]?(\d{2})(?:T.*)?$/.exec(value);
+    if (!match) return value;
+    const year = Number(match[1]) + (match[1].length === 3 ? 1911 : 0);
+    return `${year}/${match[2]}/${match[3]}`;
+  }
+
+  protected navigateWorkspace(event: Event, targetId: string): void {
+    event.preventDefault();
+    const panels = new Set(this.collapsedPanels());
+    panels.delete(targetId === 'market-chart' ? 'chart' : 'board');
+    this.collapsedPanels.set(panels);
+    afterNextRender(() => {
+      const target = document.getElementById(targetId);
+      if (!target) return;
+      for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+      }
+      if (targetId === 'workspace-settings') target.querySelector('details')?.setAttribute('open', '');
+      target.tabIndex = -1;
+      target.style.scrollMarginTop = `${(document.querySelector('.planning-summary')?.getBoundingClientRect().height ?? 80) + 24}px`;
+      target.scrollIntoView({ block: 'start' });
+      target.focus({ preventScroll: true });
+    }, { injector: this.dialogInjector });
+  }
   protected readonly quoteChange = signal(0);
   protected readonly quoteSource = signal('');
   protected readonly quoteSourceTime = signal('');
@@ -151,12 +177,8 @@ export class App {
   protected readonly priceAlertError = signal('');
   protected readonly costModel = computed(() => this.portfolioCalculator.costSettings());
   protected readonly costModelError = signal('');
-  protected openWorkspaceSettings(): void {
-    const details = document.querySelector<HTMLDetailsElement>('#workspace-settings > details');
-    if (details) details.open = true;
-  }
   protected readonly numericSettingsError = signal('');
-  protected updateNumericSetting(key: 'availableCash' | 'maxRiskPerTrade' | 'maxStockWeight' | 'feeDiscount' | 'cashOpeningBalance', raw: string): void {
+  protected updateNumericSetting(key: 'availableCash' | 'maxRiskPerTrade' | 'maxStockWeight' | 'feeDiscount' | 'cashOpeningBalance' | 'financingRate' | 'shortBorrowRate', raw: string): void {
     const value = Number(raw);
     const minimum = key === 'maxRiskPerTrade' || key === 'maxStockWeight' ? 1 : key === 'cashOpeningBalance' ? -Number.MAX_VALUE : 0;
     const maximum = key === 'feeDiscount' ? 1 : key === 'maxStockWeight' ? 100 : Number.MAX_VALUE;
@@ -308,11 +330,12 @@ export class App {
   protected readonly editingPresetOrderId = signal<string | null>(null);
   protected readonly selectedBoardRecord = signal<BoardRecordSelection | null>(null);
   protected readonly pendingBoardRecordDelete = signal<string | null>(null);
-  protected readonly orderEntryMode = signal<'holding' | 'preset'>('holding');
+  protected readonly orderEntryMode = signal<'holding' | 'preset' | 'reduce'>('holding');
+  private orderDraftEdited = false;
   protected readonly presetOrderAction = signal<PresetOrderAction>('buy');
   protected readonly shareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly simulationShareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
-  protected readonly collapsedPanels = signal<Set<string>>(new Set());
+  protected readonly collapsedPanels = signal<Set<string>>(new Set(['future', 'backtest']));
   protected readonly saveStatus = signal('');
   protected readonly autoSaveEnabled = signal(true);
   protected readonly saveError = signal('');
@@ -455,6 +478,11 @@ export class App {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsed.getTime()) || this.toInputDate(parsed) !== date || date > this.todayInputValue() || (position.tradeDate && date < position.tradeDate)) return '成交日期須在入倉日與今天之間。';
     return '';
   });
+  protected closingFieldError(field: 'price' | 'shares' | 'date'): string {
+    const error = this.closingError();
+    const matches = field === 'price' ? error.includes('成交價') : field === 'shares' ? error.includes('股數') : error.includes('日期');
+    return matches ? error : '';
+  }
   protected readonly closingPreview = computed(() => {
     const position = this.closingPosition();
     if (!position || this.closingError()) return null;
@@ -559,11 +587,17 @@ export class App {
     const form = this.positionForm();
     if (!/^\d{4,6}$/.test(form.symbol.trim())) return '請輸入 4～6 位數字的股票代號。';
     if (!Number.isFinite(form.entryPrice) || form.entryPrice <= 0) return '請輸入大於 0 的委託價格。';
+    if (this.orderEntryMode() === 'holding' && form.tradeDate) {
+      const date = new Date(`${form.tradeDate}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(form.tradeDate) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== form.tradeDate || form.tradeDate > this.todayInputValue()) return '入倉日期須為有效日期，且不能晚於今天。';
+    }
     if (!Number.isInteger(form.shares) || form.shares <= 0) return '股數必須是大於 0 的整數。';
     if (this.shareUnit() === 'boardLot' && form.shares % 1000 !== 0) return '整張股數須為 1000 的倍數，或切換成零股。';
     if (this.shareUnit() === 'oddLot' && form.shares > 999) return '零股請輸入 1～999 股。';
-    if (form.stopLossPrice !== undefined && (!Number.isFinite(form.stopLossPrice) || form.stopLossPrice <= 0)) return '停損價須大於 0，或留空。';
-    if (!Number.isFinite(form.targetPrice) || form.targetPrice < 0) return '預計出場價須大於 0，或留空。';
+    if (this.orderEntryMode() !== 'preset' || this.presetOrderAction() !== 'sell') {
+      if (form.stopLossPrice !== undefined && (!Number.isFinite(form.stopLossPrice) || form.stopLossPrice <= 0)) return '停損價須大於 0，或留空。';
+      if (!Number.isFinite(form.targetPrice) || form.targetPrice < 0) return '預計出場價須大於 0，或留空。';
+    }
     if (this.orderEntryMode() === 'preset' && this.presetOrderAction() === 'sell') {
       if (!this.canCreateSellPreset()) return '此股票沒有可供賣出的持倉。';
       if (form.type !== '現股多單' && form.type !== '融資') return '賣出持倉請選擇現股多單或融資；空單請使用持倉回補流程。';
@@ -572,11 +606,31 @@ export class App {
     return '';
   });
 
-  protected changeOrderMode(mode: 'holding' | 'preset'): void {
+  protected orderFieldError(field: 'symbol' | 'entryPrice' | 'shares' | 'stopLossPrice' | 'targetPrice' | 'tradeDate'): string {
+    const error = this.orderFormError();
+    const matches = field === 'symbol' ? error.includes('股票代號') : field === 'entryPrice' ? error.includes('委託價格') : field === 'shares' ? /股數|零股|合計賣出/.test(error) : field === 'stopLossPrice' ? error.includes('停損價') : field === 'tradeDate' ? error.includes('入倉日期') : error.includes('預計出場價');
+    return matches ? error : '';
+  }
+
+  protected changeOrderMode(mode: 'holding' | 'preset' | 'reduce'): void {
     this.orderEntryMode.set(mode);
     this.editingPositionId.set(null);
     this.editingPresetOrderId.set(null);
     this.orderStatus.set('');
+  }
+
+  protected planPositionSale(position: TradePosition): void {
+    if (position.type !== '現股多單' && position.type !== '融資') return;
+    this.changeOrderMode('preset');
+    this.presetOrderAction.set('sell');
+    this.orderDraftEdited = true;
+    const price = this.latestPrices()[position.symbol] ?? (position.symbol === this.stockSymbol() ? this.latestPrice() : 0);
+    this.positionForm.update(form => ({ ...form, symbol: position.symbol, type: position.type, shares: position.shares,
+      entryPrice: price > 0 ? price : 0, stopLossPrice: undefined, targetPrice: 0 }));
+    this.shareUnit.set(position.shares <= 999 ? 'oddLot' : 'boardLot');
+    this.onPresetExpiryChange(this.presetDateMax);
+    this.orderStatus.set((price > 0 ? '已帶入最近取得的行情價格，請確認委託價。' : '尚無行情，請自行輸入委託價。')
+      + '股數未調整，額度按同股票與類型合計；整張與零股混合請拆單。本頁不送出券商委託。');
   }
 
   protected cancelOrderEdit(): void {
@@ -639,7 +693,7 @@ export class App {
     stockSymbol: this.stockSymbol(), stockName: this.stockName(), stockRecords: this.stockRecords(),
     latestPrices: this.latestPrices(), tradePositions: this.tradePositions(), presetOrders: this.presetOrders(),
     closedTrades: this.closedTrades(), presetFills: this.presetFills(), archivedPresetOrders: this.archivedPresetOrders(), chartIndicators: this.chartIndicators(), priceAlerts: this.priceAlerts(), stockIndustries: this.stockIndustries(), costModel: this.costModel(), cashMovements: this.cashMovements(), cashOpeningBalance: this.cashOpeningBalance(), cashTrackingEnabled: this.cashTrackingEnabled(), availableCash: this.availableCash(), maxRiskPerTrade: this.maxRiskPerTrade(),
-    maxStockWeight: this.maxStockWeight(), feeDiscount: this.feeDiscount(),
+    maxStockWeight: this.maxStockWeight(), feeDiscount: this.feeDiscount(), financingRate: this.financingRate(), shortBorrowRate: this.shortBorrowRate(),
   }));
   protected readonly hasUnsavedChanges = computed(() => this.workspaceContent() !== this.savedWorkspaceContent());
   protected readonly holdingViewMode = signal<'current' | 'all'>('all');
@@ -1263,6 +1317,7 @@ export class App {
         this.autoSaveEnabled.set(false);
         return;
       }
+      if (this.workspaceContent() === this.savedWorkspaceContent()) return;
       const raw = this.workspaceBackupJson();
       localStorage.setItem(this.workspaceStorageKey, raw);
       this.expectedStoredWorkspace = raw;
@@ -1314,6 +1369,8 @@ export class App {
   }
 
   protected loadCurrentPrice(): void {
+    this.quoteChange.set(0);
+    this.turnover.set(0);
     this.quoteFetchedAt.set('');
     this.quoteSource.set('');
     this.quoteSourceTime.set('');
@@ -1367,7 +1424,7 @@ export class App {
         this.stockName.set(quote.name || requestedSymbol);
         this.quoteError.set('');
 
-        if (this.stockSymbol() === requestedSymbol && !this.editingPositionId() && !this.editingPresetOrderId()) {
+        if (this.stockSymbol() === requestedSymbol && !this.editingPositionId() && !this.editingPresetOrderId() && !this.orderDraftEdited) {
           this.syncOrderFormToStock(requestedSymbol, quote.close);
         }
 
@@ -1545,12 +1602,14 @@ export class App {
   }
 
   protected onPositionFieldChange<K extends keyof TradePositionInput>(field: K, value: TradePositionInput[K]): void {
+    this.orderDraftEdited = true;
     this.orderStatus.set('');
     this.positionForm.update((current) => ({ ...current, [field]: value }));
   }
 
   protected onPresetOrderActionChange(value: PresetOrderAction): void {
     if (value === 'sell' && !this.canCreateSellPreset()) return;
+    this.orderDraftEdited = true;
     this.presetOrderAction.set(value);
     if (value === 'sell') {
       const holding = this.sellableFormStockPositions()[0];
@@ -1559,13 +1618,9 @@ export class App {
   }
 
   protected onShareUnitChange(value: 'boardLot' | 'oddLot'): void {
+    this.orderDraftEdited = true;
     this.shareUnit.set(value);
-    this.positionForm.update((form) => ({
-      ...form,
-      shares: value === 'boardLot'
-        ? Math.max(1000, Math.round(form.shares / 1000) * 1000)
-        : Math.min(Math.max(form.shares, 1), 999),
-    }));
+    this.orderStatus.set('已切換交易單位，股數保持不變；請依欄位提示確認數量。');
   }
 
   protected onPresetExpiryChange(value: string): void {
@@ -1590,6 +1645,7 @@ export class App {
   }
 
   protected applySuggestedShares(): void {
+    this.orderDraftEdited = true;
     if (this.suggestedRiskShares() <= 0) { this.orderStatus.set('風險或資金預算不足目前交易單位，請切換零股或調整規劃。'); return; }
     const rawShares = this.suggestedRiskShares();
     const shares = this.shareUnit() === 'boardLot'
@@ -1599,11 +1655,37 @@ export class App {
   }
 
   protected closeTradePosition(position: TradePosition): void {
+    this.closeTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.closingPositionId.set(position.id);
     this.closingPrice.set(this.latestPrices()[position.symbol] ?? (position.symbol === this.stockSymbol() ? this.latestPrice() : 0));
     this.closingShares.set(position.shares);
     this.closingDate.set(this.todayInputValue());
     this.closingStatus.set('');
+    afterNextRender(() => {
+      const dialog = document.getElementById('position-close-dialog') as HTMLDialogElement | null;
+      if (dialog && !dialog.open) { dialog.showModal(); dialog.querySelector<HTMLInputElement>('input')?.focus(); }
+    }, { injector: this.dialogInjector });
+  }
+
+  private readonly dialogInjector = inject(Injector);
+  private closeTrigger: HTMLElement | null = null;
+
+  protected dismissPositionClose(): void {
+    const trigger = this.closeTrigger;
+    const dialog = document.getElementById('position-close-dialog') as HTMLDialogElement | null;
+    if (dialog?.open) dialog.close();
+    this.closingPositionId.set(null);
+    afterNextRender(() => {
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+      else document.getElementById('holdings-center')?.focus({ preventScroll: true });
+    }, { injector: this.dialogInjector });
+    this.closeTrigger = null;
+  }
+
+  protected sellPlanProfit(): number | null {
+    if (this.orderFormError()) return null;
+    const form = this.positionForm();
+    return this.sellHoldingProfit({ ...form, id: 'preview', action: 'sell', validDays: this.nearTermDays(), createdAt: '' }, form.entryPrice);
   }
 
   protected confirmPositionClose(): void {
@@ -1622,7 +1704,7 @@ export class App {
     this.confirmUndoTrade.set(false);
     this.undoTradeStatus.set('');
     this.closingStatus.set(`已記錄 ${position.symbol} ${isShort ? '回補' : '平倉'} ${shares} 股，剩餘 ${preview.remaining} 股。`);
-    this.closingPositionId.set(null);
+    this.dismissPositionClose();
   }
 
   protected deletePositionGroup(symbol: string): void {
@@ -1640,7 +1722,7 @@ export class App {
     const form = this.positionForm();
     const symbol = form.symbol.trim();
     const shares = this.normalizedOrderShares(form.shares);
-    const entryPrice = Math.max(form.entryPrice, 1);
+    const entryPrice = form.entryPrice;
     const targetPrice = entryPrice;
 
     if (!symbol) {
@@ -1715,8 +1797,9 @@ export class App {
     this.recordQuoteLoading.set(symbol);
     this.recordQuoteError.set('');
     this.stockSymbol.set(symbol);
+    this.stockName.set('');
     this.editingPositionId.set(null);
-    this.positionForm.update((form) => ({ ...form, symbol }));
+    this.syncOrderFormToStock(symbol, 0);
     this.recordSymbolInput.set('');
     this.loadCurrentPrice();
   }
@@ -1938,6 +2021,8 @@ export class App {
       if (typeof saved['maxRiskPerTrade'] === 'number') this.maxRiskPerTrade.set(saved['maxRiskPerTrade']);
       if (typeof saved['maxStockWeight'] === 'number') this.maxStockWeight.set(saved['maxStockWeight']);
       if (typeof saved['feeDiscount'] === 'number') this.feeDiscount.set(saved['feeDiscount']);
+      this.financingRate.set(typeof saved['financingRate'] === 'number' ? saved['financingRate'] : 4.5);
+      this.shortBorrowRate.set(typeof saved['shortBorrowRate'] === 'number' ? saved['shortBorrowRate'] : 3.2);
       const symbol = typeof saved['stockSymbol'] === 'string' ? saved['stockSymbol'].replace(/\D/g, '') : '';
       if (symbol) {
         this.stockSymbol.set(symbol);
@@ -1962,7 +2047,8 @@ export class App {
   }
 
   private syncOrderFormToStock(symbol: string, marketPrice: number): void {
-    const price = Math.max(marketPrice, 1);
+    this.orderDraftEdited = false;
+    const price = marketPrice > 0 ? marketPrice : 0;
     const existingTargets = this.tradePositions()
       .filter((position) => position.symbol === symbol && position.targetPrice > price && (position.type === '現股多單' || position.type === '融資'))
       .map((position) => position.targetPrice);
@@ -1974,7 +2060,7 @@ export class App {
       symbol,
       entryPrice: price,
       targetPrice: Math.round(targetPrice * 100) / 100,
-      stopLossPrice: Math.round(price * 0.95 * 100) / 100,
+      stopLossPrice: price > 0 ? Math.round(price * 0.95 * 100) / 100 : undefined,
       note: '',
       tradeDate: this.todayInputValue(),
     }));
@@ -2087,15 +2173,16 @@ export class App {
 
   private sellHoldingProfit(order: PresetOrder, salePrice: number): number {
     const positions = this.tradePositions().filter((position) =>
-      position.symbol === order.symbol && (position.type === '現股多單' || position.type === '融資'));
+      position.symbol === order.symbol && position.type === order.type)
+      .sort((a, b) => (a.tradeDate ?? '').localeCompare(b.tradeDate ?? ''));
     let remainingShares = order.shares;
     let profit = 0;
     for (const position of positions) {
       if (remainingShares <= 0) break;
       const shares = Math.min(position.shares, remainingShares);
-      profit += this.portfolioCalculator.simulateOrder(
-        position.entryPrice, salePrice, position.type, shares, order.validDays,
-        this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
+      profit += this.portfolioCalculator.positionProfit(
+        position, salePrice, this.feeDiscount(), this.calendarDaysBetween(position.tradeDate, this.todayInputValue()),
+        this.financingRate(), this.shortBorrowRate(), shares,
       );
       remainingShares -= shares;
     }
@@ -2199,7 +2286,7 @@ export class App {
   }
 
   private formatBoardDate(timestamp: number): string {
-    return new Intl.DateTimeFormat('zh-TW', { month: '2-digit', day: '2-digit' }).format(timestamp);
+    return new Intl.DateTimeFormat('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Taipei' }).format(timestamp);
   }
 
   private colorForBoardType(type: OrderType): string {
