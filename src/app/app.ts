@@ -1191,8 +1191,9 @@ export class App {
 
   protected readonly latestSession = computed(() => {
     const points = this.history();
-    return points[points.length - 1] ?? null;
+    return this.quoteSession() ?? points[points.length - 1] ?? null;
   });
+  private readonly quoteSession = signal<StockHistoryPoint | null>(null);
 
   protected readonly boardAxis = computed(() => {
     const [start, end] = this.boardTimeRange();
@@ -1299,6 +1300,7 @@ export class App {
       this.history.set(points.slice(-this.chartDays()));
       this.latestPrice.set(quote.close);
       this.quoteDate.set(date);
+      this.quoteSession.set(quote);
       this.quoteChange.set(quote.change);
       this.quoteSource.set(quote.source ?? 'MIS');
       this.quoteSourceTime.set(quote.quoteTime ?? '未提供');
@@ -1369,6 +1371,7 @@ export class App {
   }
 
   protected loadCurrentPrice(): void {
+    this.quoteSession.set(null);
     this.quoteChange.set(0);
     this.turnover.set(0);
     this.quoteFetchedAt.set('');
@@ -1406,6 +1409,7 @@ export class App {
         }
 
         this.quoteDate.set(quote.date);
+        this.quoteSession.set(quote);
         this.quoteChange.set(quote.change);
         this.quoteSource.set(quote.source ?? '未提供');
         this.quoteSourceTime.set(quote.quoteTime ?? '日行情無盤中時間');
@@ -1973,10 +1977,10 @@ export class App {
         if (this.liveEnabled()) this.refreshIntraday();
         if (!history.length) this.historyError.set('無法取得歷史行情，請檢查資料來源或代理設定。');
       },
-      error: () => {
+      error: (error) => {
         if (requestId !== this.historyRequestId) return;
         this.historyLoading.set(false);
-        this.historyError.set('歷史行情讀取失敗，請稍後再試。');
+        this.historyError.set(error instanceof Error ? error.message : '歷史行情讀取失敗，請稍後再試。');
       },
     });
   }

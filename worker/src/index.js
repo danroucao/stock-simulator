@@ -21,7 +21,7 @@ function corsHeaders(origin) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const requestUrl = new URL(request.url);
     const origin = request.headers.get('Origin') || '';
 
@@ -50,7 +50,11 @@ export default {
         historyUrl.searchParams.set('start_date', startDate);
         historyUrl.searchParams.set('end_date', endDate);
         const historyResponse = await fetch(historyUrl.toString(), {
-          headers: { Accept: 'application/json' },
+          headers: {
+            Accept: 'application/json',
+            ...(env?.FINMIND_API_TOKEN ? { Authorization: `Bearer ${env.FINMIND_API_TOKEN}` } : {}),
+          },
+          signal: AbortSignal.timeout(10000),
         });
         const headers = new Headers({
           'Content-Type': 'application/json; charset=utf-8',

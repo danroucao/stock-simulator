@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, catchError, forkJoin, map, of, switchMap, timeout } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap, timeout, retry, timer, throwError } from 'rxjs';
 
 interface TwseStockResponse {
   data?: [string, string, string, string, string, string, string, string, string, string][];
@@ -129,6 +129,11 @@ export class StockPriceService {
       `${this.tpexProxyUrl}/api/history?symbol=${symbol}&start_date=${formatDate(start)}&end_date=${formatDate(target)}`,
     ).pipe(
       timeout(15000),
+      map(response => {
+        if (!Array.isArray(response.data) || !response.data.length) throw new Error('History response contains no price data');
+        return response;
+      }),
+      retry({ count: 1, delay: error => error?.status === 402 || error?.status === 429 ? throwError(() => error) : timer(1000) }),
       map((response) => (response.data ?? [])
         .filter((row) => row.stock_id === symbol)
         .map((row) => {
@@ -148,7 +153,8 @@ export class StockPriceService {
         })
         .sort((left, right) => this.dateKey(left.date) - this.dateKey(right.date))
         .slice(-Math.max(days, 1))),
-      catchError(() => of([])),
+      catchError(error => error?.status === 402 || error?.status === 429
+        ? throwError(() => new Error('歷史資料來源請求額度已達上限，請稍後再試；報價快照仍可使用。')) : of([])),
     );
   }
   private getTpexLatestQuote(symbol: string): Observable<StockQuote | null> {

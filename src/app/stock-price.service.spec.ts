@@ -1,4 +1,4 @@
-import { of } from 'rxjs';
+import { of, defer, firstValueFrom, throwError } from 'rxjs';
 
 import { StockPriceService } from './stock-price.service';
 
@@ -103,3 +103,25 @@ describe('StockPriceService history', () => {
       expect(history.at(-1)?.volume).toBe(27_335_875);
     });
   });});
+
+describe('history recovery', () => {
+  it('retries an empty upstream response once and recovers the price history', async () => {
+    let attempts = 0;
+    const service = new StockPriceService({ get: (url: string) => url.includes('/api/history') ? defer(() => {
+      attempts++;
+      return of({ data: attempts === 1 ? [] : [{ date:'2026-10-08', stock_id:'6182', Trading_Volume:1000, Trading_money:129000, open:132, max:133, min:125.5, close:129, spread:-6 }] });
+    }) : of({data:[]}) } as any);
+    const history = await firstValueFrom(service.getHistory('6182',20,'2026-10-09'));
+    expect(attempts).toBe(2);
+    expect(history.at(-1)?.close).toBe(129);
+  });
+});
+
+describe('history quota', () => {
+  it('does not retry an exhausted provider quota and reports the cause', async () => {
+    let attempts = 0;
+    const service = new StockPriceService({get: (url: string) => url.includes('/api/history') ? defer(() => { attempts++; return throwError(() => ({status:402})); }) : of({data:[]})} as any);
+    await expect(firstValueFrom(service.getHistory('6182',20,'2026-10-09'))).rejects.toThrow('請求額度');
+    expect(attempts).toBe(1);
+  });
+});

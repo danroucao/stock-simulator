@@ -9,6 +9,11 @@ try {
     const page = await browser.newPage({viewport:{width,height:900}});
     await page.route('**/runtime-config.js', route => route.fulfill({contentType:'application/javascript',body:"globalThis.__STOCK_APP_CONFIG__ = { tpexProxyUrl:'https://stock-simulator-tpex-proxy.danroucao.workers.dev' };"}));
     const errors=[];
+    page.on('response', async response => {
+      if(response.url().includes('/api/history')) {
+        try { const body=await response.json(); console.log(JSON.stringify({historyUrl:response.url(),status:response.status(),message:body.msg,dataRows:Array.isArray(body.data)?body.data.length:null})); } catch { console.log(JSON.stringify({historyUrl:response.url(),status:response.status()})); }
+      }
+    });
     page.on('pageerror', error=>errors.push(error.message));
     await page.goto('http://localhost:4200');
     for (const symbol of ['2330','6182']) {
