@@ -67,15 +67,16 @@ export default {
         if (!/^\d{4,6}$/.test(symbol)) return new Response('Invalid symbol', { status: 400 });
 
         const misUrl = new URL('https://mis.twse.com.tw/stock/api/getStockInfo.jsp');
-        misUrl.searchParams.set('ex_ch', `otc_${symbol}.tw`);
+        misUrl.searchParams.set('ex_ch', `tse_${symbol}.tw|otc_${symbol}.tw`);
         misUrl.searchParams.set('json', '1');
         misUrl.searchParams.set('delay', '0');
         const misResponse = await fetch(misUrl.toString(), {
           headers: { Accept: 'application/json, text/plain, */*' },
+          signal: AbortSignal.timeout(10000),
         });
         const headers = new Headers({
           'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'public, max-age=30',
+          'Cache-Control': 'no-store',
         });
         if (origin) {
           for (const [key, value] of Object.entries(corsHeaders(origin))) headers.set(key, value);

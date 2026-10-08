@@ -1,7 +1,7 @@
 {
   "/api/tpex": {
-    "target": "https://www.tpex.org.tw",
-    "secure": true,
+    "target": "http://localhost:8787",
+    "secure": false,
     "changeOrigin": true,
     "pathRewrite": {
       "^/api/tpex": ""

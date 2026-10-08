@@ -9,6 +9,32 @@ function row(rocDate: string, close = 100): Row {
 }
 
 describe('StockPriceService history', () => {
+  it('never selects a TWSE price later than the requested historical date', () => {
+    const service = new StockPriceService({ get: () => of({}) } as any);
+    const quote = (service as any).mapQuote({ data: [row('115/10/05', 100), row('115/10/08', 120)] }, '2026-10-06');
+    expect(quote.close).toBe(100);
+    expect((service as any).mapQuote({ data: [row('115/10/08')] }, '2026-10-06')).toBeNull();
+  });
+
+  it('never falls back to a current quote for a missing historical date', () => {
+    const urls: string[] = [];
+    const service = new StockPriceService({ get: (url: string) => { urls.push(url); return of({ data: [] }); } } as any);
+    service.getLatestQuote('6182', '2026-10-01').subscribe(quote => expect(quote).toBeNull());
+    expect(urls.some(url => url.includes('/api/quote'))).toBe(false);
+  });
+  it('rejects missing intraday prices instead of using the previous close', () => {
+    const service = new StockPriceService({ get: () => of({ msgArray: [{ c: '2330', d: '20261008', z: '-', y: '100', o: '100', h: '102', l: '99', v: '10' }] }) } as any);
+    service.getIntradayQuote('2330').subscribe(quote => expect(quote).toBeNull());
+  });
+
+  it('retains source time and converts cumulative quote volume to shares', () => {
+    const service = new StockPriceService({ get: () => of({ msgArray: [{ c: '2330', d: '20261008', t: '10:30:00', z: '101', y: '100', o: '100', h: '102', l: '99', v: '10' }] }) } as any);
+    service.getIntradayQuote('2330').subscribe(quote => {
+      expect(quote?.volume).toBe(10000);
+      expect(quote?.quoteTime).toBe('10:30:00');
+      expect(quote?.change).toBe(1);
+    });
+  });
   it('merges months, sorts old-to-new and returns the requested trading-day count', () => {
     const service = new StockPriceService({ get: () => of({ data: [] }) } as any);
     const responses = [
@@ -40,7 +66,7 @@ describe('StockPriceService history', () => {
         ? of({ msgArray: [{ c:'6182',n:'合晶',d:'20260731',z:'89.00',y:'84.70',o:'92.90',h:'93.10',l:'84.00',v:'27336' }] })
         : of({ data: [] }),
     } as any);
-    service.getLatestQuote('6182', '2026-08-01').subscribe((quote) => {
+    service.getLatestQuote('6182').subscribe((quote) => {
       expect(quote?.name).toBe('合晶');
       expect(quote?.close).toBe(89);
       expect(quote?.date).toBe('20260731');

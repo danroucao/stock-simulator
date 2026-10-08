@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap, timeout } from 'rxjs';
 
 interface TwseStockResponse {
   data?: [string, string, string, string, string, string, string, string, string, string][];
@@ -33,6 +33,7 @@ interface MisQuoteResponse {
     l?: string;
     y?: string;
     v?: string;
+    t?: string;
   }>;
 }
 
@@ -46,6 +47,7 @@ export interface StockQuote {
   change: number;
   turnover: number;
   volume: number;
+  quoteTime?: string;
 }
 
 export interface StockHistoryPoint extends StockQuote {}
@@ -55,6 +57,11 @@ export class StockPriceService {
   private readonly requestUrl = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY';
   private readonly tpexProxyUrl = this.getTpexProxyUrl();
   constructor(private readonly http: HttpClient) {}
+
+  getIntradayQuote(symbol: string): Observable<StockQuote | null> {
+    const normalized = symbol.replace(/\D/g, '');
+    return normalized ? this.getTpexLatestQuote(normalized) : of(null);
+  }
 
   getLatestQuote(symbol: string, requestDate?: string): Observable<StockQuote | null> {
     const normalizedSymbol = symbol.replace(/\D/g, '');
@@ -69,7 +76,12 @@ export class StockPriceService {
       .pipe(
         map((response) => this.mapQuote(response, requestDate)),
         catchError(() => of(null)),
-        switchMap((quote) => quote ? of(quote) : this.getTpexLatestQuote(normalizedSymbol)),
+        switchMap((quote) => quote ? of(quote) : this.getTpexHistory(normalizedSymbol, 1, requestDate).pipe(
+          map(history => history.at(-1) ?? null),
+          switchMap(historyQuote => historyQuote || requestDate
+            ? of(historyQuote)
+            : this.getTpexLatestQuote(normalizedSymbol)),
+        )),
       );
   }
 
@@ -127,21 +139,25 @@ export class StockPriceService {
   }
   private getTpexLatestQuote(symbol: string): Observable<StockQuote | null> {
     return this.http.get<MisQuoteResponse>(`${this.tpexProxyUrl}/api/quote?symbol=${symbol}`).pipe(
+      timeout(15000),
       map((response) => {
         const row = response.msgArray?.find((item) => item.c === symbol);
         if (!row) return null;
         const previousClose = this.toNumber(row.y ?? '0');
-        const close = this.toNumber(row.z ?? row.y ?? '0');
+        const close = this.toNumber(row.z ?? '');
+        const open = this.toNumber(row.o ?? '');
+        const high = this.toNumber(row.h ?? '');
+        const low = this.toNumber(row.l ?? '');
+        if (!/^\d{8}$/.test(row.d ?? '') || close <= 0 || open <= 0 || low <= 0 || high < low || close < low || close > high) return null;
         return {
           date: row.d || '',
           name: row.n?.trim() || symbol,
-          open: this.toNumber(row.o ?? '0'),
-          high: this.toNumber(row.h ?? '0'),
-          low: this.toNumber(row.l ?? '0'),
+          open, high, low,
           close,
           change: close - previousClose,
           turnover: 0,
           volume: this.toNumber(row.v ?? '0') * 1000,
+          quoteTime: row.t,
         };
       }),
       catchError(() => of(null)),
@@ -162,8 +178,8 @@ export class StockPriceService {
       .sort((left, right) => this.dateKey(left.date) - this.dateKey(right.date));
 
     const targetDate = this.normalizeLookupDate(requestDate);
-    const exactMatch = targetDate ? series.find((entry) => entry.date === targetDate) : undefined;
-    const selected = exactMatch ?? series.at(-1);
+    const eligible = targetDate ? series.filter(entry => this.dateKey(entry.date) <= this.dateKey(targetDate)) : series;
+    const selected = eligible.at(-1);
 
     return selected ?? null;
   }

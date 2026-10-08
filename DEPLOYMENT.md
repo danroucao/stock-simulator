@@ -74,6 +74,12 @@ Do not append `/api/tpex` or a TPEx endpoint path.
 
 Run **Actions → Deploy Angular app to GitHub Pages → Run workflow**, or push a commit to `main`/`master`. The workflow writes the Worker URL to `public/runtime-config.js` before building. Local development keeps using `/api/tpex` through `proxy.conf.json`.
 
+## Intraday indicator updates
+
+The quote proxy requests both TWSE listed (`tse`) and OTC (`otc`) symbols. The chart's intraday update switch polls every 30 seconds while the tab is visible and today's Taipei date is selected. It replaces the current daily candle using cumulative volume; it does not add that volume repeatedly. Missing trades and older quote dates leave history intact. This is polling of the MIS source, with possible upstream delay, rather than a streaming feed.
+
+For local development, run `npm run worker:dev` in one terminal and `npm start` in another. The Angular proxy forwards `/api/tpex` to the Worker on port 8787, since TPEx itself does not implement our custom `/api/quote` or `/api/history` routes. Run `npm run worker:check` for a deployment dry run that does not publish changes. For production, redeploy the updated Worker and Angular application.
+
 The production site is configured for:
 
 ```text

@@ -1,5 +1,8 @@
 import { DecimalPipe } from '@angular/common';
-import { Component, computed, signal } from '@angular/core';
+import { calculateVolumeIndicators } from './services/volume-indicators';
+import { Component, computed, signal, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { timer } from 'rxjs';
 
 import { PositionDetails } from './components/position-details/position-details';
 import { BacktestResult, ClosedTrade, OrderType, PositionInlineChange, PresetOrder, PresetOrderAction, TradePosition, TradePositionInput } from './models/trade-position.model';
@@ -129,6 +132,33 @@ export class App {
   protected readonly isLoadingQuote = signal(false);
   protected readonly quoteError = signal('');
   protected readonly history = signal<StockHistoryPoint[]>([]);
+  private readonly indicatorHistory = signal<StockHistoryPoint[]>([]);
+  private readonly destroyRef = inject(DestroyRef);
+  private liveRequestId = 0;
+  protected readonly liveEnabled = signal(false);
+  protected readonly liveLoading = signal(false);
+  protected readonly liveStatus = signal('');
+  private historyRequestId = 0;
+  protected readonly historyLoading = signal(false);
+  protected readonly historyError = signal('');
+  protected readonly indicatorStartDate = computed(() => this.indicatorHistory()[0]?.date ?? '');
+  protected readonly indicatorCharts = computed(() => {
+    const points = calculateVolumeIndicators(this.indicatorHistory()).slice(-this.chartDays());
+    return (['obv', 'adl'] as const).map(key => {
+      const values = points.map(point => point[key]);
+      const min = values.length ? Math.min(...values) : 0;
+      const max = values.length ? Math.max(...values) : 0;
+      return {
+        key, label: key === 'obv' ? 'OBV 能量潮' : 'A/D 收集／派發線',
+        latest: points.at(-1)?.[key] ?? null, min, max,
+        path: points.map((point, index) => {
+          const x = 18 + (index + 0.5) * 724 / Math.max(points.length, 1);
+          const y = max === min ? 70 : 120 - (point[key] - min) / (max - min) * 100;
+          return `${index ? 'L' : 'M'} ${x} ${y}`;
+        }).join(' '),
+      };
+    });
+  });
   protected readonly tooltip = signal<ChartTooltip | null>(null);
   protected readonly boardTooltip = signal<BoardTooltipState | null>(null);
   protected readonly draggingBoardMarker = signal<string | null>(null);
@@ -584,6 +614,47 @@ export class App {
   ) {
     this.restoreWorkspace();
     this.loadCurrentPrice();
+    timer(30000, 30000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      if (this.liveEnabled() && document.visibilityState === 'visible') this.refreshIntraday();
+    });
+  }
+
+  protected toggleLive(): void {
+    this.liveEnabled.update(value => !value);
+    ++this.liveRequestId;
+    this.liveLoading.set(false);
+    this.liveStatus.set('');
+    if (this.liveEnabled()) this.refreshIntraday();
+  }
+
+  private refreshIntraday(): void {
+    const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    if (this.requestedDate() !== today) {
+      this.liveStatus.set('歷史日期查詢：暫停盤中更新');
+      return;
+    }
+    if (this.liveLoading() || this.historyLoading() || !this.indicatorHistory().length) return;
+    const symbol = this.stockSymbol();
+    const requestId = ++this.liveRequestId;
+    this.liveLoading.set(true);
+    this.stockPriceService.getIntradayQuote(symbol).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(quote => {
+      if (requestId !== this.liveRequestId || symbol !== this.stockSymbol() || this.requestedDate() !== today || !this.liveEnabled()) return;
+      this.liveLoading.set(false);
+      if (!quote || quote.date !== today.replaceAll('-', '')) {
+        this.liveStatus.set('無當日有效成交行情，保留歷史資料');
+        return;
+      }
+      const date = `${Number(quote.date.slice(0, 4)) - 1911}/${quote.date.slice(4, 6)}/${quote.date.slice(6, 8)}`;
+      const points = this.indicatorHistory().filter(point => point.date !== date);
+      points.push({ ...quote, date });
+      this.indicatorHistory.set(points);
+      this.history.set(points.slice(-this.chartDays()));
+      this.latestPrice.set(quote.close);
+      this.quoteDate.set(date);
+      this.quoteChange.set(quote.change);
+      this.latestPrices.update(prices => ({ ...prices, [symbol]: quote.close }));
+      this.liveStatus.set(`行情時間 ${date} ${quote.quoteTime || '未提供'}（台北）・30 秒輪詢，來源可能延遲`);
+    });
   }
 
   protected saveWorkspace(): void {
@@ -608,12 +679,17 @@ export class App {
   }
 
   protected loadCurrentPrice(): void {
+    ++this.liveRequestId;
+    this.liveLoading.set(false);
+    this.liveStatus.set('');
     const requestedSymbol = this.stockSymbol();
+    const requestedDate = this.requestedDate();
     this.isLoadingQuote.set(true);
     this.quoteError.set('');
 
     this.stockPriceService.getLatestQuote(requestedSymbol, this.requestedDate()).subscribe({
       next: (quote) => {
+        if (requestedSymbol !== this.stockSymbol() || requestedDate !== this.requestedDate()) return;
         this.isLoadingQuote.set(false);
 
         if (!quote) {
@@ -649,6 +725,7 @@ export class App {
         this.loadHistory();
       },
       error: () => {
+        if (requestedSymbol !== this.stockSymbol() || requestedDate !== this.requestedDate()) return;
         this.isLoadingQuote.set(false);
         this.quoteError.set('無法讀取股價資料，請稍後再試。');
         if (this.recordQuoteLoading() === requestedSymbol) {
@@ -666,12 +743,12 @@ export class App {
 
   protected onDateChange(value: string): void {
     this.requestedDate.set(value || this.todayInputValue());
-    this.loadHistory();
+    this.loadCurrentPrice();
   }
 
   protected onChartRangeChange(days: number): void {
     this.chartDays.set(days);
-    this.loadHistory();
+    this.history.set(this.indicatorHistory().slice(-days));
   }
 
   protected onBoardMarkerPointerDown(markerId: string, event: MouseEvent): void {
@@ -1097,12 +1174,29 @@ export class App {
   }
 
   private loadHistory(): void {
-    this.stockPriceService.getHistory(this.stockSymbol(), this.chartDays(), this.requestedDate()).subscribe({
+    ++this.liveRequestId;
+    this.liveLoading.set(false);
+    this.liveStatus.set('');
+    const requestId = ++this.historyRequestId;
+    const symbol = this.stockSymbol();
+    const date = this.requestedDate();
+    this.historyLoading.set(true);
+    this.historyError.set('');
+    this.indicatorHistory.set([]);
+    this.history.set([]);
+    this.stockPriceService.getHistory(symbol, 120, date).subscribe({
       next: (history) => {
-        this.history.set(history);
+        if (requestId !== this.historyRequestId || symbol !== this.stockSymbol() || date !== this.requestedDate()) return;
+        this.historyLoading.set(false);
+        this.indicatorHistory.set(history);
+        this.history.set(history.slice(-this.chartDays()));
+        if (this.liveEnabled()) this.refreshIntraday();
+        if (!history.length) this.historyError.set('無法取得歷史行情，請檢查資料來源或代理設定。');
       },
       error: () => {
-        this.history.set([]);
+        if (requestId !== this.historyRequestId) return;
+        this.historyLoading.set(false);
+        this.historyError.set('歷史行情讀取失敗，請稍後再試。');
       },
     });
   }
@@ -1374,11 +1468,7 @@ export class App {
   }
 
   private todayInputValue(): string {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
   }
 
   protected onPriceChange(value: number): void {

@@ -88,6 +88,7 @@
       <div class="panel-header">
         <h2>歷史股價圖表</h2>
         <div class="chart-toolbar">
+          <button type="button" class="chart-range-button" [class.active]="liveEnabled()" (click)="toggleLive()" [attr.aria-pressed]="liveEnabled()">{{ liveEnabled() ? '停止盤中更新' : '啟用盤中更新' }}</button>
           <label class="field compact chart-date-field">
             <span>查詢日期</span>
             <input type="date" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
@@ -141,6 +142,22 @@
             <text [attr.x]="tick.x" y="305" class="chart-date-label" [attr.text-anchor]="tick.x < 100 ? 'start' : tick.x > 650 ? 'end' : 'middle'">{{ tick.label }}</text>
           }
         </svg>
+        @if (historyLoading()) { <p role="status">歷史行情載入中…</p> }
+        @if (liveLoading()) { <p role="status">盤中行情更新中…</p> }
+        @if (liveStatus()) { <p role="status">{{ liveStatus() }}</p> }
+        @if (historyError()) { <p class="error-text" role="alert">{{ historyError() }}</p> }
+        @for (indicator of indicatorCharts(); track indicator.key) {
+          <div class="chart-section-label volume-label"><span>{{ indicator.label }}</span><em>{{ indicator.latest === null ? '無資料' : (indicator.latest | number:'1.0-0') }}</em></div>
+          <svg viewBox="0 0 760 140" class="volume-chart" role="img" [attr.aria-label]="indicator.label">
+            <line x1="18" y1="120" x2="742" y2="120" class="chart-grid-line"></line>
+            <text x="18" y="14" class="chart-axis-label">{{ indicator.max | number:'1.0-0' }}</text>
+            <text x="18" y="138" class="chart-axis-label">{{ indicator.min | number:'1.0-0' }}</text>
+            <path [attr.d]="indicator.path" fill="none" [attr.stroke]="indicator.key === 'obv' ? '#60a5fa' : '#c084fc'" stroke-width="2"></path>
+          </svg>
+        }
+        @if (indicatorStartDate()) {
+          <p class="backtest-note">日線指標・成交量單位：股。以 {{ indicatorStartDate() }} 為累積起點（歷史最多 120 個交易日），OBV 起始為 0。切換顯示天數不重設累積值。盤中數值尚未定案；啟用更新時以當日累計成交量重算。</p>
+        }
         <div class="chart-section-label volume-label"><span>成交量</span><em>Volume</em></div>
         <svg viewBox="0 0 760 140" class="volume-chart" preserveAspectRatio="xMidYMid meet" aria-label="成交量圖表">
           <line x1="14" y1="132" x2="746" y2="132" class="chart-grid-line"></line>

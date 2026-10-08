@@ -8,6 +8,8 @@
 
 # Node
 /node_modules
+/.wrangler
+/worker/.wrangler
 npm-debug.log
 yarn-error.log
 

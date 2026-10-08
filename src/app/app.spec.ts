@@ -1,10 +1,53 @@
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 
 import { App } from './app';
 import { StockPriceService } from './stock-price.service';
 
 describe('App', () => {
+  function setupLive() {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
+    const date = `${Number(today.slice(0, 4)) - 1911}/${today.slice(5, 7)}/${today.slice(8, 10)}`;
+    app.requestedDate.set(today);
+    app.indicatorHistory.set([{ date: '100/01/01', close: 100, high: 102, low: 98, volume: 100 }]);
+    const service = TestBed.inject(StockPriceService) as any;
+    const quote = { date: today.replaceAll('-', ''), close: 102, open: 100, high: 102, low: 98, volume: 200, change: 2, turnover: 0 };
+    return { app, service, quote, date };
+  }
+
+  it('replaces cumulative intraday volume on repeated updates', () => {
+    const { app, service, quote, date } = setupLive();
+    service.getIntradayQuote = () => of(quote);
+    app.toggleLive();
+    app.refreshIntraday();
+    expect(app.indicatorHistory().length).toBe(2);
+    expect(app.history().at(-1).date).toBe(date);
+    expect(app.indicatorCharts()[0].latest).toBe(200);
+    service.getIntradayQuote = () => of({ ...quote, volume: 250 });
+    app.refreshIntraday();
+    expect(app.indicatorCharts()[0].latest).toBe(250);
+  });
+
+  it('ignores a pending live quote after the selected stock changes', () => {
+    const { app, service, quote } = setupLive();
+    const response = new Subject();
+    service.getIntradayQuote = () => response;
+    app.toggleLive();
+    app.stockSymbol.set('6182');
+    response.next(quote);
+    expect(app.indicatorHistory().length).toBe(1);
+  });
+
+  it('does not request live quotes while viewing a historical date', () => {
+    const { app, service } = setupLive();
+    let requests = 0;
+    service.getIntradayQuote = () => { requests++; return of(null); };
+    app.requestedDate.set('2000-01-01');
+    app.toggleLive();
+    expect(requests).toBe(0);
+    expect(app.liveStatus()).toContain('歷史日期');
+  });
   beforeEach(async () => {
     localStorage.clear();
     await TestBed.configureTestingModule({
