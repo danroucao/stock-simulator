@@ -1,10 +1,114 @@
 import { TestBed } from '@angular/core/testing';
 import { of, Subject } from 'rxjs';
+import { vi } from 'vitest';
 
 import { App } from './app';
 import { StockPriceService } from './stock-price.service';
 
 describe('App', () => {
+  it('moves partial buy fills into holdings and removes the order only after all shares fill', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const date = app.todayDate();
+    app.tradePositions.set([]);
+    const order = { id: 'buy-fill', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 100, createdAt: date, validDays: 1, expiryDate: date };
+    app.presetOrders.set([order]);
+    app.startPresetFill(order);
+    app.fillShares.set(400);
+    app.fillPrice.set(99);
+    app.confirmPresetFill();
+    expect(app.tradePositions()[0].shares).toBe(400);
+    expect(app.tradePositions()[0].entryPrice).toBe(99);
+    expect(app.presetOrders()[0].shares).toBe(600);
+    expect(app.presetFills()[0].remainingShares).toBe(600);
+    expect(app.presetFills()[0].plannedPrice).toBe(100);
+    expect(app.presetFills()[0].price).toBe(99);
+    app.startPresetFill(app.presetOrders()[0]);
+    app.confirmPresetFill();
+    expect(app.presetOrders().length).toBe(0);
+    expect(app.tradePositions().reduce((sum: number, p: any) => sum + p.shares, 0)).toBe(1000);
+    app.confirmPresetFill();
+    expect(app.tradePositions().length).toBe(2);
+    expect(app.presetFills().length).toBe(2);
+    app.saveWorkspace();
+    expect(JSON.parse(localStorage.getItem('stock-simulator-workspace-v1')!).presetFills.length).toBe(2);
+  });
+
+  it('deducts sold shares and records realized profit without creating an extra holding', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const date = app.todayDate();
+    app.tradePositions.set([{ id: 'holding', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 90, targetPrice: 110, note: '', tradeDate: date }]);
+    const order = { id: 'sell-fill', action: 'sell', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 100, createdAt: date, validDays: 1, expiryDate: date };
+    app.presetOrders.set([order]);
+    app.startPresetFill(order);
+    app.fillShares.set(400);
+    app.confirmPresetFill();
+    expect(app.tradePositions()[0].shares).toBe(600);
+    expect(app.closedTrades()[0].shares).toBe(400);
+    expect(app.closedTrades()[0].realizedProfit).toBeGreaterThan(0);
+    expect(app.presetOrders()[0].shares).toBe(600);
+  });
+  it('copies a preset as a new draft without replacing the original order', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const original = { id: 'original', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 100, exitPrice: 110, validDays: 5, createdAt: '2026-10-08', note: '分批' };
+    app.presetOrders.set([original]);
+    app.copyPresetOrder(original);
+    expect(app.editingPresetOrderId()).toBeNull();
+    expect(app.positionForm().note).toBe('分批');
+    app.onPositionFieldChange('entryPrice', 98);
+    app.createPresetOrderFromForm();
+    expect(app.presetOrders().length).toBe(2);
+    expect(app.presetOrders()[0].entryPrice).toBe(100);
+    expect(app.presetOrders()[1].entryPrice).toBe(98);
+  });
+  it('automatically saves changes after a short delay', async () => {
+    vi.useFakeTimers();
+    const fixture = TestBed.createComponent(App);
+    try {
+      const app = fixture.componentInstance as any;
+      app.availableCash.set(123456);
+      fixture.detectChanges();
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(JSON.parse(localStorage.getItem('stock-simulator-workspace-v1')!).availableCash).toBe(123456);
+      expect(app.hasUnsavedChanges()).toBe(false);
+    } finally {
+      fixture.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps unsaved state and shows a retry message when storage fails', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.availableCash.set(123456);
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota'); });
+    try {
+      app.saveWorkspace();
+      expect(app.saveError()).toContain('儲存失敗');
+      expect(app.hasUnsavedChanges()).toBe(true);
+    } finally {
+      storageWrite.mockRestore();
+    }
+    app.saveWorkspace();
+    expect(app.saveError()).toBe('');
+    expect(app.hasUnsavedChanges()).toBe(false);
+  });
+  it('rejects malformed stock codes without changing the selected stock', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.recordSymbolInput.set('23a30');
+    app.addStockRecord();
+    expect(app.stockSymbol()).toBe('2330');
+    expect(app.recordSymbolInput()).toBe('23a30');
+    expect(app.recordQuoteError()).toContain('4～6');
+  });
+
+  it('clears old indicator data immediately when a new quote is pending', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    const response = new Subject();
+    (TestBed.inject(StockPriceService) as any).getLatestQuote = () => response;
+    app.loadCurrentPrice();
+    expect(app.history()).toEqual([]);
+    expect(app.indicatorStartDate()).toBe('');
+    expect(app.isLoadingQuote()).toBe(true);
+  });
   function setupLive() {
     const app = TestBed.createComponent(App).componentInstance as any;
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
@@ -297,7 +401,7 @@ describe('App', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.stock-chart rect')?.hasAttribute('rx')).toBe(false);
     expect(compiled.querySelector('.board-form')?.textContent).not.toContain('預計出場價（選填）');
-    const presetMode = Array.from(compiled.querySelectorAll('.order-mode-switch button')).find((button) => button.textContent?.includes('建立近期預設單')) as HTMLButtonElement;
+    const presetMode = Array.from(compiled.querySelectorAll('.order-mode-switch button')).find((button) => button.textContent?.includes('規劃預設單')) as HTMLButtonElement;
     presetMode.click();
     fixture.detectChanges();
     expect(compiled.querySelector('.board-form')?.textContent).toContain('預計出場價（選填）');

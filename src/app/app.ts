@@ -1,6 +1,7 @@
 import { DecimalPipe } from '@angular/common';
 import { calculateVolumeIndicators } from './services/volume-indicators';
-import { Component, computed, signal, DestroyRef, inject } from '@angular/core';
+import { PresetFill } from './models/trade-position.model';
+import { Component, computed, signal, DestroyRef, inject, effect, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 
@@ -139,6 +140,8 @@ export class App {
   protected readonly liveLoading = signal(false);
   protected readonly liveStatus = signal('');
   private historyRequestId = 0;
+  private quoteRequestId = 0;
+  protected readonly todayDate = computed(() => this.todayInputValue());
   protected readonly historyLoading = signal(false);
   protected readonly historyError = signal('');
   protected readonly indicatorStartDate = computed(() => this.indicatorHistory()[0]?.date ?? '');
@@ -198,6 +201,170 @@ export class App {
   protected readonly simulationShareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly collapsedPanels = signal<Set<string>>(new Set());
   protected readonly saveStatus = signal('');
+  protected readonly autoSaveEnabled = signal(true);
+  protected readonly saveError = signal('');
+  protected readonly backupStatus = signal('');
+  protected readonly exportingExcel = signal(false);
+  protected readonly orderStatus = signal('');
+  protected readonly pendingPresetCancel = signal<string | null>(null);
+  protected readonly fillOrderId = signal<string | null>(null);
+  protected readonly fillPrice = signal(0);
+  protected readonly fillShares = signal(0);
+  protected readonly fillDate = signal(this.todayInputValue());
+  protected readonly fillMessage = signal('');
+  protected readonly presetFills = signal<PresetFill[]>([]);
+  protected readonly fillHistoryScope = signal<'current' | 'all'>('current');
+  protected readonly visiblePresetFills = computed(() => [...this.presetFills()]
+    .filter(fill => this.fillHistoryScope() === 'all' || fill.symbol === this.stockSymbol())
+    .sort((a, b) => b.date.localeCompare(a.date) || b.recordedAt.localeCompare(a.recordedAt)));
+
+  protected isPresetExpired(order: PresetOrder): boolean {
+    return !!order.expiryDate && order.expiryDate < this.todayInputValue();
+  }
+
+  protected startPresetFill(order: PresetOrder): void {
+    this.fillOrderId.set(order.id);
+    this.fillPrice.set(order.entryPrice);
+    this.fillShares.set(order.shares);
+    this.fillDate.set(this.isPresetExpired(order) ? order.expiryDate! : this.todayInputValue());
+    this.fillMessage.set('');
+  }
+
+  protected confirmPresetFill(): void {
+    const order = this.presetOrders().find(item => item.id === this.fillOrderId());
+    if (!order) return;
+    const price = this.fillPrice(), shares = this.fillShares(), date = this.fillDate();
+    if (!Number.isFinite(price) || price <= 0 || !Number.isInteger(shares) || shares <= 0 || shares > order.shares) {
+      this.fillMessage.set('請輸入有效成交價與股數；成交股數不可超過剩餘委託股數。'); return;
+    }
+    const createdDate = order.createdAt.includes('T') ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date(order.createdAt)) : order.createdAt.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < createdDate || date > this.todayInputValue() || (order.expiryDate && date > order.expiryDate)) {
+      this.fillMessage.set('成交日期須在建立日與有效期限之間，且不可晚於今天。'); return;
+    }
+    const id = `fill-${crypto.randomUUID()}`;
+    if (order.action === 'sell') {
+      const positions = this.tradePositions().filter(position => position.symbol === order.symbol && position.type === order.type && (!position.tradeDate || position.tradeDate <= date))
+        .sort((a, b) => (a.tradeDate ?? '').localeCompare(b.tradeDate ?? ''));
+      if (positions.reduce((sum, position) => sum + position.shares, 0) < shares) {
+        this.fillMessage.set('符合股票、交易類型與成交日期的持倉不足。'); return;
+      }
+      let remaining = shares;
+      const sold = new Map<string, number>();
+      const closed: ClosedTrade[] = [];
+      for (const position of positions) {
+        const quantity = Math.min(position.shares, remaining);
+        if (!quantity) break;
+        sold.set(position.id, quantity);
+        closed.push({ ...position, id: `${id}-${position.id}`, shares: quantity, exitPrice: price, exitDate: date,
+          realizedProfit: this.portfolioCalculator.simulateOrder(position.entryPrice, price, position.type, quantity,
+            this.calendarDaysBetween(position.tradeDate, date), this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) });
+        remaining -= quantity;
+      }
+      this.tradePositions.update(items => items.map(position => ({ ...position, shares: position.shares - (sold.get(position.id) ?? 0) })).filter(position => position.shares > 0));
+      this.closedTrades.update(items => [...items, ...closed]);
+    } else {
+      this.tradePositions.update(items => [...items, { id, symbol: order.symbol, type: order.type, shares,
+        entryPrice: price, targetPrice: order.exitPrice ?? price, stopLossPrice: order.stopLossPrice,
+        tradeDate: date, note: `${order.note ?? ''} 預設單成交：${order.id}`.trim() }]);
+    }
+    this.presetOrders.update(items => items.flatMap(item => item.id !== order.id ? [item] : item.shares > shares ? [{ ...item, shares: item.shares - shares }] : []));
+    this.presetFills.update(items => [...items, { id, orderId: order.id, symbol: order.symbol, type: order.type,
+      action: order.action ?? 'buy', date, price, shares, plannedPrice: order.entryPrice,
+      remainingShares: order.shares - shares, recordedAt: new Date().toISOString(), note: order.note ?? '' }]);
+    if (this.editingPresetOrderId() === order.id) this.editingPresetOrderId.set(null);
+    this.fillOrderId.set(null);
+    this.fillMessage.set(`已記錄 ${order.symbol} 成交 ${shares} 股，${order.action === 'sell' ? '已更新持倉與已實現損益' : '已轉入持倉'}；剩餘 ${order.shares - shares} 股。`);
+  }
+
+  protected copyPresetOrder(order: PresetOrder): void {
+    this.editPresetOrder(order);
+    this.editingPresetOrderId.set(null);
+    this.orderStatus.set(`已帶入 ${order.symbol} 的預設單。請調整委託價後建立新單，原單會保留。`);
+  }
+  protected readonly orderFormError = computed(() => {
+    const form = this.positionForm();
+    if (!/^\d{4,6}$/.test(form.symbol.trim())) return '請輸入 4～6 位數字的股票代號。';
+    if (!Number.isFinite(form.entryPrice) || form.entryPrice <= 0) return '請輸入大於 0 的委託價格。';
+    if (!Number.isInteger(form.shares) || form.shares <= 0) return '股數必須是大於 0 的整數。';
+    if (this.shareUnit() === 'boardLot' && form.shares % 1000 !== 0) return '整張股數須為 1000 的倍數，或切換成零股。';
+    if (this.shareUnit() === 'oddLot' && form.shares > 999) return '零股請輸入 1～999 股。';
+    if (form.stopLossPrice !== undefined && (!Number.isFinite(form.stopLossPrice) || form.stopLossPrice <= 0)) return '停損價須大於 0，或留空。';
+    if (!Number.isFinite(form.targetPrice) || form.targetPrice < 0) return '預計出場價須大於 0，或留空。';
+    if (this.orderEntryMode() === 'preset' && this.presetOrderAction() === 'sell') {
+      if (!this.canCreateSellPreset()) return '此股票沒有可供賣出的持倉。';
+      if (form.shares > this.sellableFormStockShares()) return '委託股數超過可賣持倉，請調整股數。';
+    }
+    return '';
+  });
+
+  protected changeOrderMode(mode: 'holding' | 'preset'): void {
+    this.orderEntryMode.set(mode);
+    this.editingPositionId.set(null);
+    this.editingPresetOrderId.set(null);
+    this.orderStatus.set('');
+  }
+
+  protected cancelOrderEdit(): void {
+    this.editingPositionId.set(null);
+    this.editingPresetOrderId.set(null);
+    this.syncOrderFormToStock(this.stockSymbol(), this.valuationPrice());
+    this.orderStatus.set('已取消編輯，原記錄未變更。');
+  }
+
+  protected useCurrentMarketPrice(): void {
+    const price = this.latestPrices()[this.positionForm().symbol.trim()];
+    if (price > 0) this.onPositionFieldChange('entryPrice', price);
+    else this.orderStatus.set('此股票尚無行情，請先在上方新增或選擇股票。');
+  }
+  protected readonly excelScope = signal<'all' | 'current'>('all');
+  protected readonly excelIncludeExpired = signal(false);
+  protected readonly excelOrders = computed(() => this.presetOrders().filter(order =>
+    (this.excelScope() === 'all' || order.symbol === this.stockSymbol()) &&
+    (this.excelIncludeExpired() || !order.expiryDate || order.expiryDate >= this.todayDate()),
+  ));
+  protected readonly excelPreview = computed(() => {
+    const orders = this.excelOrders();
+    return {
+      count: orders.length,
+      symbols: new Set(orders.map(order => order.symbol)).size,
+      buyAmount: orders.filter(order => order.action !== 'sell').reduce((sum, order) => sum + order.entryPrice * order.shares, 0),
+      sellAmount: orders.filter(order => order.action === 'sell').reduce((sum, order) => sum + order.entryPrice * order.shares, 0),
+      unknownExpiry: orders.filter(order => !order.expiryDate).length,
+    };
+  });
+
+  protected async exportPresetOrdersExcel(): Promise<void> {
+    const orders = this.excelOrders();
+    if (this.exportingExcel() || !orders.length) return;
+    const scope = this.excelScope() === 'all' ? '全部股票' : this.stockSymbol();
+    const filterDescription = `${scope}；${this.excelIncludeExpired() ? '包含過期單' : '排除已知過期單'}；判斷日期 ${this.todayDate()}`;
+    this.exportingExcel.set(true);
+    this.backupStatus.set('');
+    try {
+      const { buildPresetOrderWorkbook } = await import('./services/preset-order-export');
+      const book = await buildPresetOrderWorkbook(orders, Object.fromEntries(this.stockRecords().map(record => [record.symbol, record.name])), filterDescription);
+      const data = await book.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([new Uint8Array(data)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `預設單規劃-${scope}-${this.todayInputValue()}.xlsx`;
+      document.body.appendChild(link);
+      try { link.click(); } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+      this.backupStatus.set('已送出預設單 Excel 下載，包含明細、布局總覽及使用說明。');
+    } catch {
+      this.backupStatus.set('Excel 匯出失敗，請稍後重試。');
+    } finally {
+      this.exportingExcel.set(false);
+    }
+  }
+  private readonly savedWorkspaceContent = signal('');
+  private readonly workspaceContent = computed(() => JSON.stringify({
+    stockSymbol: this.stockSymbol(), stockName: this.stockName(), stockRecords: this.stockRecords(),
+    latestPrices: this.latestPrices(), tradePositions: this.tradePositions(), presetOrders: this.presetOrders(),
+    closedTrades: this.closedTrades(), presetFills: this.presetFills(), availableCash: this.availableCash(), maxRiskPerTrade: this.maxRiskPerTrade(),
+    maxStockWeight: this.maxStockWeight(), feeDiscount: this.feeDiscount(),
+  }));
+  protected readonly hasUnsavedChanges = computed(() => this.workspaceContent() !== this.savedWorkspaceContent());
   protected readonly holdingViewMode = signal<'current' | 'all'>('all');
   protected readonly nearTermDays = signal(5);
   protected readonly presetExpiryDate = signal(this.addBusinessDays(this.firstAvailableTradingDate(), 4));
@@ -325,7 +492,7 @@ export class App {
     (total, trade) => total + trade.realizedProfit, 0,
   ));
 
-  protected readonly pendingOrderCapital = computed(() => this.presetOrders().reduce(
+  protected readonly pendingOrderCapital = computed(() => this.presetOrders().filter(order => !this.isPresetExpired(order)).reduce(
     (total, order) => total + (order.action === 'sell' ? 0 : order.entryPrice * order.shares), 0,
   ));
 
@@ -639,6 +806,13 @@ export class App {
     private readonly portfolioCalculator: PortfolioCalculatorService,
   ) {
     this.restoreWorkspace();
+    effect(onCleanup => {
+      const content = this.workspaceContent();
+      const enabled = this.autoSaveEnabled();
+      if (!enabled || content === untracked(this.savedWorkspaceContent)) return;
+      const pendingSave = setTimeout(() => this.saveWorkspace(), 1000);
+      onCleanup(() => clearTimeout(pendingSave));
+    });
     this.loadCurrentPrice();
     timer(30000, 30000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       if (this.liveEnabled() && document.visibilityState === 'visible') this.refreshIntraday();
@@ -684,27 +858,54 @@ export class App {
   }
 
   protected saveWorkspace(): void {
-    if (typeof localStorage === 'undefined') return;
-    const snapshot = {
-      version: 1,
-      savedAt: new Date().toISOString(),
-      stockSymbol: this.stockSymbol(),
-      stockName: this.stockName(),
-      stockRecords: this.stockRecords(),
-      latestPrices: this.latestPrices(),
-      tradePositions: this.tradePositions(),
-      presetOrders: this.presetOrders(),
-      closedTrades: this.closedTrades(),
-      availableCash: this.availableCash(),
-      maxRiskPerTrade: this.maxRiskPerTrade(),
-      maxStockWeight: this.maxStockWeight(),
-      feeDiscount: this.feeDiscount(),
-    };
-    localStorage.setItem(this.workspaceStorageKey, JSON.stringify(snapshot));
-    this.saveStatus.set(`已儲存 ${new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date())}`);
+    this.saveError.set('');
+    try {
+      if (typeof localStorage === 'undefined') throw new Error('Storage unavailable');
+      localStorage.setItem(this.workspaceStorageKey, this.workspaceBackupJson());
+      this.savedWorkspaceContent.set(this.workspaceContent());
+      this.saveStatus.set(`已儲存 ${this.formatSavedTime(new Date())}（台北）`);
+    } catch {
+      this.saveError.set('儲存失敗，資料仍保留在目前頁面。請檢查瀏覽器儲存權限或空間後，按「立即儲存」重試。');
+    }
+  }
+
+  private workspaceBackupJson(): string {
+    return JSON.stringify({ version: 1, savedAt: new Date().toISOString(), ...JSON.parse(this.workspaceContent()) }, null, 2);
+  }
+
+  private formatSavedTime(date: Date): string {
+    return new Intl.DateTimeFormat('zh-TW', {
+      timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).format(date);
+  }
+
+  protected downloadWorkspaceBackup(): void {
+    this.backupStatus.set('');
+    let downloadUrl: string | undefined;
+    try {
+      const blob = new Blob([this.workspaceBackupJson()], { type: 'application/json;charset=utf-8' });
+      downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `stock-workspace-${this.todayInputValue()}-${Date.now()}.json`;
+      document.body.appendChild(link);
+      try { link.click(); } finally { link.remove(); }
+      this.backupStatus.set('已送出備份下載，請到瀏覽器下載清單確認 JSON 檔案。');
+    } catch {
+      this.backupStatus.set('無法下載備份，請檢查瀏覽器下載權限後重試。');
+    } finally {
+      if (downloadUrl) setTimeout(() => URL.revokeObjectURL(downloadUrl!), 1000);
+    }
   }
 
   protected loadCurrentPrice(): void {
+    const quoteRequestId = ++this.quoteRequestId;
+    ++this.historyRequestId;
+    this.historyLoading.set(false);
+    this.indicatorHistory.set([]);
+    this.history.set([]);
+    this.tooltip.set(null);
     ++this.liveRequestId;
     this.liveLoading.set(false);
     this.liveStatus.set('');
@@ -715,7 +916,7 @@ export class App {
 
     this.stockPriceService.getLatestQuote(requestedSymbol, this.requestedDate()).subscribe({
       next: (quote) => {
-        if (requestedSymbol !== this.stockSymbol() || requestedDate !== this.requestedDate()) return;
+        if (quoteRequestId !== this.quoteRequestId || requestedSymbol !== this.stockSymbol() || requestedDate !== this.requestedDate()) return;
         this.isLoadingQuote.set(false);
 
         if (!quote) {
@@ -751,7 +952,7 @@ export class App {
         this.loadHistory();
       },
       error: () => {
-        if (requestedSymbol !== this.stockSymbol() || requestedDate !== this.requestedDate()) return;
+        if (quoteRequestId !== this.quoteRequestId || requestedSymbol !== this.stockSymbol() || requestedDate !== this.requestedDate()) return;
         this.isLoadingQuote.set(false);
         this.quoteError.set('無法讀取股價資料，請稍後再試。');
         if (this.recordQuoteLoading() === requestedSymbol) {
@@ -768,6 +969,10 @@ export class App {
   }
 
   protected onDateChange(value: string): void {
+    if (value > this.todayInputValue()) {
+      this.quoteError.set('請選擇今天或之前的日期。');
+      return;
+    }
     this.requestedDate.set(value || this.todayInputValue());
     this.loadCurrentPrice();
   }
@@ -775,6 +980,10 @@ export class App {
   protected onChartRangeChange(days: number): void {
     this.chartDays.set(days);
     this.history.set(this.indicatorHistory().slice(-days));
+  }
+
+  protected returnToToday(): void {
+    this.onDateChange(this.todayInputValue());
   }
 
   protected onBoardMarkerPointerDown(markerId: string, event: MouseEvent): void {
@@ -882,6 +1091,8 @@ export class App {
   }
 
   protected editPresetOrder(order: PresetOrder): void {
+    this.pendingPresetCancel.set(null);
+    this.orderStatus.set(`正在編輯 ${order.symbol} 預設單，儲存後更新原單。`);
     this.orderEntryMode.set('preset');
     this.editingPositionId.set(null);
     this.editingPresetOrderId.set(order.id);
@@ -894,7 +1105,7 @@ export class App {
       shares: order.shares,
       entryPrice: order.entryPrice,
       targetPrice: order.exitPrice ?? 0,
-      note: '',
+      note: order.note ?? '',
       tradeDate: this.todayInputValue(),
       stopLossPrice: order.stopLossPrice,
     });
@@ -912,6 +1123,7 @@ export class App {
   }
 
   protected onPositionFieldChange<K extends keyof TradePositionInput>(field: K, value: TradePositionInput[K]): void {
+    this.orderStatus.set('');
     this.positionForm.update((current) => ({ ...current, [field]: value }));
   }
 
@@ -987,6 +1199,7 @@ export class App {
   }
 
   protected addTradePosition(): void {
+    if (this.orderFormError()) return;
     const form = this.positionForm();
     const symbol = form.symbol.trim();
     const shares = this.normalizedOrderShares(form.shares);
@@ -1034,6 +1247,7 @@ export class App {
     }
 
     this.editingPositionId.set(null);
+    this.orderStatus.set(editingId ? '已儲存持倉修改。' : `已新增 ${symbol} 持倉 ${shares} 股。`);
     this.positionForm.set({
       symbol,
       type: form.type,
@@ -1048,8 +1262,19 @@ export class App {
   }
 
   protected addStockRecord(): void {
-    const symbol = this.recordSymbolInput().replace(/\D/g, '');
-    if (!symbol) return;
+    const symbol = this.recordSymbolInput().trim();
+    if (!/^\d{4,6}$/.test(symbol)) {
+      this.recordQuoteError.set('請輸入 4～6 位數字的股票代號，例如 2330 或 6182。');
+      return;
+    }
+    if (this.recordQuoteLoading()) return;
+    const existing = this.stockRecords().find(record => record.symbol === symbol);
+    if (existing) {
+      this.recordSymbolInput.set('');
+      this.recordQuoteError.set('');
+      this.selectStockRecord(existing);
+      return;
+    }
     this.recordQuoteLoading.set(symbol);
     this.recordQuoteError.set('');
     this.stockSymbol.set(symbol);
@@ -1060,6 +1285,8 @@ export class App {
   }
 
   protected selectStockRecord(record: StockRecord): void {
+    this.recordQuoteLoading.set('');
+    this.recordQuoteError.set('');
     this.stockSymbol.set(record.symbol);
     this.stockName.set(record.name);
     this.latestPrice.set(record.latestPrice);
@@ -1113,6 +1340,7 @@ export class App {
   }
 
   protected createPresetOrderFromForm(): void {
+    if (this.orderFormError()) return;
     const form = this.positionForm();
     const symbol = form.symbol.trim();
     if (!symbol) return;
@@ -1135,11 +1363,13 @@ export class App {
       expiryDate: this.presetExpiryDate(),
       shareUnit: this.shareUnit(),
       stopLossPrice: form.stopLossPrice,
+      note: form.note.trim(),
     };
     this.presetOrders.update((orders) => editingId
       ? orders.map((order) => order.id === editingId ? { ...updatedOrder, id: editingId, createdAt: order.createdAt } : order)
       : [...orders, updatedOrder]);
     this.editingPresetOrderId.set(null);
+    this.orderStatus.set(editingId ? '已儲存預設單修改。' : `已建立 ${symbol} ${action === 'sell' ? '賣出' : '買進'}預設單：${shares} 股 × ${form.entryPrice} 元。可修改價格後建立下一筆。`);
   }
 
   protected createPresetOrder(): void {
@@ -1157,8 +1387,10 @@ export class App {
   }
 
   protected removePresetOrder(id: string): void {
+    this.pendingPresetCancel.set(null);
     this.presetOrders.update((orders) => orders.filter((order) => order.id !== id));
     if (this.editingPresetOrderId() === id) this.editingPresetOrderId.set(null);
+    this.orderStatus.set('已取消預設單。');
   }
 
   protected presetProfit(order: PresetOrder): number {
@@ -1241,6 +1473,7 @@ export class App {
       if (Array.isArray(saved['tradePositions'])) this.tradePositions.set(saved['tradePositions'] as TradePosition[]);
       if (Array.isArray(saved['presetOrders'])) this.presetOrders.set(saved['presetOrders'] as PresetOrder[]);
       if (Array.isArray(saved['closedTrades'])) this.closedTrades.set(saved['closedTrades'] as ClosedTrade[]);
+      if (Array.isArray(saved['presetFills'])) this.presetFills.set(saved['presetFills'] as PresetFill[]);
       if (saved['latestPrices'] && typeof saved['latestPrices'] === 'object') this.latestPrices.set(saved['latestPrices'] as Record<string, number>);
       if (typeof saved['availableCash'] === 'number') this.availableCash.set(saved['availableCash']);
       if (typeof saved['maxRiskPerTrade'] === 'number') this.maxRiskPerTrade.set(saved['maxRiskPerTrade']);
@@ -1260,9 +1493,12 @@ export class App {
         }
       }
       this.saveStatus.set('已還原上次儲存的資料');
+      const savedAt = new Date(String(saved['savedAt'] ?? ''));
+      if (Number.isFinite(savedAt.getTime())) this.saveStatus.set(`已還原資料・上次儲存 ${this.formatSavedTime(savedAt)}（台北）`);
+      this.savedWorkspaceContent.set(this.workspaceContent());
     } catch {
-      localStorage.removeItem(this.workspaceStorageKey);
-      this.saveStatus.set('儲存資料已損壞，已改用預設資料');
+      this.autoSaveEnabled.set(false);
+      this.saveError.set('無法讀取上次儲存的資料，已暫停自動儲存並保留原紀錄。確認目前資料後，可按「立即儲存」覆寫。');
     }
   }
 
@@ -1423,7 +1659,7 @@ export class App {
     const holdingProfit = positions.reduce((total, position) => total + stressProfitForPosition(position, position.shares), 0);
     const remainingShares = new Map(positions.map((position) => [position.id, position.shares]));
     let stressedShares = positions.reduce((total, position) => total + position.shares, 0);
-    const presetProfit = this.currentStockPresetOrders().reduce((total, order) => {
+    const presetProfit = this.currentStockPresetOrders().filter(order => !this.isPresetExpired(order)).reduce((total, order) => {
       if (order.action === 'sell') {
         if (scenarioPrice < order.entryPrice) return total;
         let sharesToSell = order.shares;

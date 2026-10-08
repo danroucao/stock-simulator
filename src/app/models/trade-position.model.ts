@@ -30,7 +30,23 @@ export interface PositionInlineChange {
 
 export type PresetOrderAction = 'buy' | 'sell';
 
+export interface PresetFill {
+  id: string;
+  orderId: string;
+  symbol: string;
+  type: OrderType;
+  action: PresetOrderAction;
+  date: string;
+  price: number;
+  shares: number;
+  plannedPrice: number;
+  remainingShares: number;
+  recordedAt: string;
+  note: string;
+}
+
 export interface PresetOrder {
+  note?: string;
   id: string;
   symbol: string;
   type: OrderType;
