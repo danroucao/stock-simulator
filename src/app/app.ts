@@ -142,8 +142,11 @@ export class App {
   protected readonly historyLoading = signal(false);
   protected readonly historyError = signal('');
   protected readonly indicatorStartDate = computed(() => this.indicatorHistory()[0]?.date ?? '');
+  private readonly volumeIndicatorSeries = computed(() => calculateVolumeIndicators(this.indicatorHistory()));
+  protected readonly hoveredIndicators = computed(() => this.volumeIndicatorSeries().find(point => point.date === this.tooltip()?.date));
   protected readonly indicatorCharts = computed(() => {
-    const points = calculateVolumeIndicators(this.indicatorHistory()).slice(-this.chartDays());
+    const series = this.volumeIndicatorSeries();
+    const points = series.slice(-this.chartDays());
     return (['obv', 'adl'] as const).map(key => {
       const values = points.map(point => point[key]);
       const min = values.length ? Math.min(...values) : 0;
@@ -151,6 +154,7 @@ export class App {
       return {
         key, label: key === 'obv' ? 'OBV 能量潮' : 'A/D 收集／派發線',
         latest: points.at(-1)?.[key] ?? null, min, max,
+        change: series.length > 1 ? series.at(-1)![key] - series.at(-2)![key] : null,
         path: points.map((point, index) => {
           const x = 18 + (index + 0.5) * 724 / Math.max(points.length, 1);
           const y = max === min ? 70 : 120 - (point[key] - min) / (max - min) * 100;

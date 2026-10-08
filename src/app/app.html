@@ -114,6 +114,10 @@
             <div>收：{{ tooltip()?.close | number: '1.0-0' }}</div>
             <div>漲跌：{{ tooltip()?.change | number: '1.0-2' }}</div>
             <div>成交量：{{ tooltip()?.volume | number: '1.0-0' }}</div>
+            @if (hoveredIndicators(); as indicators) {
+              <div>OBV：{{ indicators.obv | number:'1.0-0' }}</div>
+              <div>A/D：{{ indicators.adl | number:'1.0-0' }}</div>
+            }
           </div>
         }
 
@@ -148,6 +152,9 @@
         @if (historyError()) { <p class="error-text" role="alert">{{ historyError() }}</p> }
         @for (indicator of indicatorCharts(); track indicator.key) {
           <div class="chart-section-label volume-label"><span>{{ indicator.label }}</span><em>{{ indicator.latest === null ? '無資料' : (indicator.latest | number:'1.0-0') }}</em></div>
+          @if (indicator.change !== null) {
+            <p class="backtest-note">較前一交易日：<span [class.positive]="indicator.change > 0" [class.negative]="indicator.change < 0">{{ indicator.change > 0 ? '+' : '' }}{{ indicator.change | number:'1.0-0' }}</span></p>
+          }
           <svg viewBox="0 0 760 140" class="volume-chart" role="img" [attr.aria-label]="indicator.label">
             <line x1="18" y1="120" x2="742" y2="120" class="chart-grid-line"></line>
             <text x="18" y="14" class="chart-axis-label">{{ indicator.max | number:'1.0-0' }}</text>
