@@ -8,12 +8,18 @@ const previous = await read(output, { schemaVersion:1, status:'unconfigured', ma
 const attemptedAt = new Date().toISOString();
 let requestCount = 0;
 async function json(url, token) {
+  const target = new URL(url), source = `${target.hostname}${target.pathname}${target.searchParams.has('dataset') ? ' ['+target.searchParams.get('dataset')+']' : ''}`;
   if (++requestCount > 260) throw new Error('本次掃描超過 260 次請求預算，保留上次結果');
   for (let attempt = 0; attempt < 3; attempt++) {
     const response = await fetch(url, {headers:{Accept:'application/json', 'User-Agent':'stock-alert-center/1.0', ...(token ? {Authorization:`Bearer ${token}`} : {})}, signal:AbortSignal.timeout(30000)});
-    if ([401,402,403,429].includes(response.status)) throw new Error(`行情權限或配額不足（${response.status}），請確認 FinMind 整批還原行情權限`);
+    if ([401,402,403,429].includes(response.status)) throw new Error(`${source}：權限或配額不足（${response.status}）`);
     if (response.status >= 500 && attempt < 2) { await new Promise(r=>setTimeout(r, 1000*(attempt+1))); continue; }
-    if (!response.ok) throw new Error(`行情來源 HTTP ${response.status}`);
+    if (!response.ok) {
+      let diagnostic = '';
+      try { const detail = await response.json(); diagnostic = String(detail.msg || detail.message || '').slice(0,240); } catch {}
+      if (token) diagnostic = diagnostic.replaceAll(token,'***');
+      throw new Error(`${source}：HTTP ${response.status}${diagnostic ? '；'+diagnostic : ''}`);
+    }
     const body = await response.json();
     if (body.status && body.status !== 200) throw new Error(`FinMind 回傳 ${body.status}，掃描停止`);
     return body;
@@ -30,7 +36,9 @@ async function finmind(dataset, params = {}) {
 try {
   if (!process.env.FINMIND_API_TOKEN) throw new Error('尚未設定 FINMIND_API_TOKEN；需要可存取整批日線與還原日線的 FinMind 權限');
   // Authoritative company registries: ETF, warrants and indices are not companies.
+  console.log('取得上市普通股公司名冊');
   const listed = await json('https://openapi.twse.com.tw/v1/opendata/t187ap03_L');
+  console.log('取得上櫃普通股公司名冊');
   const otc = await json('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O');
   if (!Array.isArray(listed) || !Array.isArray(otc) || listed.length < 500 || otc.length < 300) throw new Error('上市／上櫃普通股公司名冊不完整');
   const universe = new Map();
@@ -42,6 +50,7 @@ try {
   if (universe.size < 1000) throw new Error('無法解析完整普通股名冊');
   const taipeiDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(new Date());
   const taipeiHour = Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',hour:'2-digit',hourCycle:'h23'}).format(new Date()));
+  console.log('取得 FinMind 交易日曆');
   const sessions = [...new Set((await finmind('TaiwanStockTradingDate')).map(r=>r.date))].filter(d => d < taipeiDate || d === taipeiDate && taipeiHour >= 19).sort().slice(-100);
   if (sessions.length < 100) throw new Error('交易日曆不足 100 日');
   const expectedMarketDate = sessions.at(-1);
@@ -51,6 +60,7 @@ try {
   // Refetch the rolling window: historical adjustment factors can change on corporate actions.
   // Never cache adjusted prices across successful scan dates without refreshing their basis.
   for (const date of sessions) {
+    if (date === sessions[0] || date === expectedMarketDate) console.log(`取得 ${date} 的全市場還原與原始行情`);
     const adjusted = await finmind('TaiwanStockPriceAdj',{start_date:date,end_date:date});
     const raw = await finmind('TaiwanStockPrice',{start_date:date,end_date:date});
     const rawMap = new Map(raw.filter(r=>r.date===date).map(r=>[r.stock_id,r]));

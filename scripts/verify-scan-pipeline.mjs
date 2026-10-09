@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+await mkdir('tmp',{recursive:true});
 const root = await mkdtemp(resolve('tmp/scan-pipeline-'));
 const runner = pathToFileURL(resolve('scripts/scan-market.mjs')).href;
 const sessions=[], cursor=new Date('2026-10-08T00:00:00Z');
