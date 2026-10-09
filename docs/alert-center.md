@@ -1,5 +1,13 @@
 # 提醒中心：架構、設定與限制
 
+## 正式環境驗證紀錄
+
+2026-10-10（Asia/Taipei）：提醒中心已發布至 GitHub Pages，正式手機版導覽與未啟用狀態顯示通過。獨立發布版本建置與 111 項測試通過；原工作區其他尚未提交的修改保留，未一起發布。
+
+[真實掃描驗證](https://github.com/danroucao/stock-simulator/actions/runs/37971939841)已成功讀取 GitHub Secret、取得官方上市／上櫃名冊及 FinMind 交易日曆，但 `TaiwanStockPriceAdj` 回傳 HTTP 400：`Your level is register. Please update your user level.`。目前 token 為 register 等級，缺少整批還原行情權限，未產生／發布市場事件。未啟用每日正式結果發布。
+
+後續需調整 FinMind 帳號權限或更換具整批還原行情權限的 token，再以 `publish=false` 執行驗證。既有行情代理可繼續運作，不需要改成掃描未還原價格來繞過此限制。
+
 第一版為站內每日收盤事件清單，沒有外部通知、即時掃描或自動下單。全市場結果由排程產生，不會在使用者開啟網站時掃描。
 
 ## 現有架構與資料發現
