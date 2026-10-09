@@ -2,20 +2,63 @@
   <nav class="planning-summary" aria-label="固定規劃摘要">
     <span>{{ stockSymbol() }} · 規劃資金 {{ availableCash() | number:'1.0-0' }}</span><span>淨曝險 {{ isLoadingQuote() ? '更新中…' : (portfolioExposure().net | number:'1.0-0') }}</span>
     <span>{{ oversubscribedSellOrders().length ? '出場委託超量' : estimatedPriceSymbols().length ? '部分行情缺漏' : hasSamplePositions() ? '含範例資料' : '交易規劃模式' }}</span>
-    <a href="#market-chart" (click)="navigateWorkspace($event, 'market-chart')">行情</a><a href="#strategy-board" (click)="navigateWorkspace($event, 'strategy-board')">交易規劃</a><a href="#holdings-center" (click)="navigateWorkspace($event, 'holdings-center')">持倉</a><a href="#fill-history-title" (click)="navigateWorkspace($event, 'fill-history-title')">紀錄</a><a href="#workspace-settings" (click)="navigateWorkspace($event, 'workspace-settings')">設定</a>
+    <a href="#market-chart" (click)="navigateWorkspace($event, 'market-chart')">行情</a><a href="#strategy-board" (click)="navigateWorkspace($event, 'strategy-board')">交易規劃</a><a href="#holdings-center" (click)="navigateWorkspace($event, 'holdings-center')">持倉</a><a href="#fill-history-title" (click)="navigateWorkspace($event, 'fill-history-title')">委託成交</a><a href="#risk-analysis" (click)="navigateWorkspace($event, 'risk-analysis')">風險分析</a><a href="#workspace-settings" (click)="navigateWorkspace($event, 'workspace-settings')">設定</a>
   </nav>
+  <section class="stock-record-panel" aria-labelledby="stock-record-title">
+    <p class="save-status" role="status">{{ hasUnsavedChanges() ? (autoSaveEnabled() ? '有變更，將自動儲存…' : '有尚未儲存的變更') : (saveStatus() || '資料已儲存') }}</p>
+    @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p> }
+    @if (numericSettingsError()) { <p class="record-status error" role="alert">{{ numericSettingsError() }}</p> }
+    @if (storageConflict()) {
+      <div class="export-settings" role="alert"><strong>另一分頁已修改工作區，自動儲存已暫停</strong><p>請先下載備份保留目前內容，再選擇採用另一分頁資料，或保留本頁覆寫。覆寫前會在瀏覽器保留另一份資料。</p>
+        <button type="button" class="ghost-button" (click)="useOtherTabWorkspace()">採用另一分頁資料</button>
+        <button type="button" class="ghost-button" (click)="keepThisTabWorkspace()">確認保留本頁並覆寫</button>
+      </div>
+    }
+    <div class="stock-record-heading">
+      <div><span class="eyebrow">多檔股票</span><h2 id="stock-record-title">股票記錄</h2></div>
+      <div class="stock-record-add"><input type="text" inputmode="numeric" maxlength="6" aria-label="股票代號" placeholder="輸入股票代號，例如 2317" [value]="recordSymbolInput()" (input)="recordSymbolInput.set($any($event.target).value)" (keydown.enter)="addStockRecord()" /><button type="button" [disabled]="!!recordQuoteLoading()" (click)="addStockRecord()">{{ recordQuoteLoading() ? '查詢中…' : '＋ 新增／切換股票' }}</button></div>
+    </div>
+    @if (recordQuoteLoading()) {
+      <p class="record-status" role="status">正在取得 {{ recordQuoteLoading() }} 的上市／上櫃股價…</p>
+    }
+    @if (recordQuoteError()) {
+      <p class="record-status error" role="alert">{{ recordQuoteError() }}</p>
+    }
+    <div class="stock-record-list">
+      @for (record of stockRecords(); track record.symbol) {
+        <div class="stock-record-card" [class.active]="stockSymbol() === record.symbol">
+          <button type="button" class="record-select" [attr.aria-label]="'查看 ' + record.symbol + ' ' + record.name" [attr.aria-pressed]="stockSymbol() === record.symbol" (click)="selectStockRecord(record)">
+          <div><strong>{{ record.symbol }}</strong>@if (record.name && record.name !== record.symbol) { <span>{{ record.name }}</span> }</div>
+          <div class="record-price"><strong>{{ record.latestPrice | number:'1.0-2' }}</strong><span [class.positive]="record.change >= 0" [class.negative]="record.change < 0">{{ record.change >= 0 ? '+' : '' }}{{ record.change | number:'1.0-2' }}</span></div>
+          </button>
+                    @if (pendingStockRecordDelete() === record.symbol) {
+            <div class="record-delete-confirm" (click)="$event.stopPropagation()">
+              <span>僅刪除追蹤記錄，持倉與待成交委託會保留</span>
+              <button type="button" class="ghost-button confirm" (click)="removeStockRecord(record.symbol, $event)">確認刪除</button>
+              <button type="button" class="ghost-button" (click)="cancelRemoveStockRecord($event)">取消</button>
+            </div>
+          } @else {
+            <details class="record-menu" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()"><summary [attr.aria-label]="record.symbol + ' 的更多操作'">⋯</summary><button type="button" class="record-remove" (click)="requestRemoveStockRecord(record.symbol, $event)" [attr.aria-label]="'刪除 ' + record.symbol + ' 個股記錄'">刪除追蹤記錄</button></details>
+          }
+        </div>
+      } @empty {
+        <p class="record-empty">輸入股票代號，建立第一筆股票記錄。</p>
+      }
+    </div>
+  </section>
+
   <section class="hero-card">
     <div class="hero-copy">
       <span class="eyebrow">股票下單模擬器</span>
       <h1>{{ title() }}</h1>
       <p>
-        先選擇股票並查看行情，再建立持倉或近期預設單，試算獲利與風險。
+        先選擇股票並查看行情，再建立持倉或近期待成交委託，試算獲利與風險。
       </p>
     </div>
     <div class="summary-grid">
       <div class="summary-item accent">
         <span>目標股票</span>
-        <strong>{{ stockSymbol() }} · {{ stockName() || '名稱待取得' }}</strong>
+        <strong>{{ stockLabel(stockSymbol(), stockName()) }}</strong>
       </div>
       <div class="summary-item">
         <span>{{ isLoadingQuote() ? '行情載入中' : quoteError() ? '行情更新失敗' : '最新市價' }}</span>
@@ -33,80 +76,6 @@
     @if (quoteError()) { <p class="error-text" role="alert">{{ quoteError() }} {{ latestPrice() > 0 ? '目前顯示上次取得的價格。' : '' }} <button type="button" class="ghost-button" [disabled]="isLoadingQuote()" (click)="loadCurrentPrice()">重新取得行情</button></p> }
   </section>
 
-  <section class="stock-record-panel" aria-labelledby="stock-record-title">
-    <div class="stock-record-heading workspace-controls" aria-label="資料儲存控制">
-      <div><strong>資料儲存</strong><p class="backtest-note">保存在目前瀏覽器，重新開啟會還原；尚未送出的表單內容不包含在儲存範圍。</p></div>
-      <div class="panel-header-actions">
-        <label><input type="checkbox" [checked]="autoSaveEnabled()" (change)="autoSaveEnabled.set($any($event.target).checked)" /> 自動儲存</label>
-        <button type="button" class="ghost-button" (click)="saveWorkspace()">立即儲存</button>
-        <button type="button" class="save-workspace-button" (click)="downloadWorkspaceBackup()">下載資料備份</button>
-        <button type="button" class="save-workspace-button" (click)="backupFile.click()">匯入備份</button>
-        <button type="button" class="save-workspace-button" (click)="previewBeforeImportBackup()">還原前備份</button>
-        <input #backupFile type="file" accept=".json,application/json" hidden (change)="readWorkspaceBackup($event)" />
-      </div>
-    </div>
-    <p class="save-status" role="status">{{ hasUnsavedChanges() ? (autoSaveEnabled() ? '有變更，將自動儲存…' : '有尚未儲存的變更') : (saveStatus() || '資料已儲存') }}</p>
-    @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p> }
-    @if (numericSettingsError()) { <p class="record-status error" role="alert">{{ numericSettingsError() }}</p> }
-    @if (storageConflict()) {
-      <div class="export-settings" role="alert"><strong>另一分頁已修改工作區，自動儲存已暫停</strong><p>請先下載備份保留目前內容，再選擇採用另一分頁資料，或保留本頁覆寫。覆寫前會在瀏覽器保留另一份資料。</p>
-        <button type="button" class="ghost-button" (click)="useOtherTabWorkspace()">採用另一分頁資料</button>
-        <button type="button" class="ghost-button" (click)="keepThisTabWorkspace()">確認保留本頁並覆寫</button>
-      </div>
-    }
-    @if (backupStatus()) { <p class="record-status" role="status">{{ backupStatus() }}</p> }
-    @if (importPreview(); as preview) {
-      <div class="export-settings"><strong>還原 {{ preview.filename }}</strong><p>{{ preview.stocks }} 檔股票 · {{ preview.positions }} 筆持倉 · {{ preview.orders }} 筆預設單 · {{ preview.fills }} 筆成交紀錄</p>
-        <p>確認後將取代目前工作區，不合併資料。</p><button type="button" class="ghost-button" (click)="confirmWorkspaceImport()">確認取代並還原</button><button type="button" class="ghost-button" (click)="importPreview.set(null)">取消，保留目前資料</button>
-      </div>
-    }
-    <details class="export-settings">
-    <summary>預設單 Excel 匯出 <span>{{ excelPreview().count }} 筆可匯出</span></summary>
-    <div class="stock-record-heading" aria-label="預設單 Excel 匯出設定">
-      <div><strong>預設單 Excel</strong><p class="backtest-note">每個價位各列一筆，買進與賣出分開統計；金額未含交易成本。</p></div>
-      <div class="panel-header-actions">
-        <label>匯出範圍 <select [value]="excelScope()" [disabled]="exportingExcel()" (change)="excelScope.set($any($event.target).value)"><option value="all">全部股票</option><option value="current">目前股票 {{ stockSymbol() }}</option></select></label>
-        <label><input type="checkbox" [checked]="excelIncludeExpired()" [disabled]="exportingExcel()" (change)="excelIncludeExpired.set($any($event.target).checked)" /> 包含過期單</label>
-        <button type="button" class="save-workspace-button" [disabled]="exportingExcel() || !excelPreview().count" (click)="exportPresetOrdersExcel()">{{ exportingExcel() ? 'Excel 產生中…' : '匯出 Excel（' + excelPreview().count + ' 筆）' }}</button>
-      </div>
-    </div>
-    <p class="record-status" role="status">{{ excelPreview().count }} 筆 · {{ excelPreview().symbols }} 檔股票 · 買進委託金額 {{ excelPreview().buyAmount | number:'1.0-0' }} 元 · 賣出委託金額 {{ excelPreview().sellAmount | number:'1.0-0' }} 元</p>
-    @if (excelPreview().unknownExpiry) { <p class="backtest-note">{{ excelPreview().unknownExpiry }} 筆未設定有效日期，無法判定是否過期，仍會匯出。</p> }
-    @if (!excelPreview().count) { <p class="record-empty">目前範圍沒有可匯出的預設單，可切換股票範圍、勾選包含過期單，或先建立預設單。</p> }
-    </details>
-    <div class="stock-record-heading">
-      <div><span class="eyebrow">多檔股票</span><h2 id="stock-record-title">股票記錄</h2></div>
-      <div class="stock-record-add"><input type="text" inputmode="numeric" maxlength="6" aria-label="股票代號" placeholder="輸入股票代號，例如 2317" [value]="recordSymbolInput()" (input)="recordSymbolInput.set($any($event.target).value)" (keydown.enter)="addStockRecord()" /><button type="button" [disabled]="!!recordQuoteLoading()" (click)="addStockRecord()">{{ recordQuoteLoading() ? '查詢中…' : '＋ 新增／切換股票' }}</button></div>
-    </div>
-    @if (recordQuoteLoading()) {
-      <p class="record-status" role="status">正在取得 {{ recordQuoteLoading() }} 的上市／上櫃股價…</p>
-    }
-    @if (recordQuoteError()) {
-      <p class="record-status error" role="alert">{{ recordQuoteError() }}</p>
-    }
-    <div class="stock-record-list">
-      @for (record of stockRecords(); track record.symbol) {
-        <div class="stock-record-card" [class.active]="stockSymbol() === record.symbol">
-          <button type="button" class="record-select" [attr.aria-label]="'查看 ' + record.symbol + ' ' + record.name" [attr.aria-pressed]="stockSymbol() === record.symbol" (click)="selectStockRecord(record)">
-          <div><strong>{{ record.symbol }}</strong><span>{{ record.name }}</span></div>
-          <div class="record-price"><strong>{{ record.latestPrice | number:'1.0-2' }}</strong><span [class.positive]="record.change >= 0" [class.negative]="record.change < 0">{{ record.change >= 0 ? '+' : '' }}{{ record.change | number:'1.0-2' }}</span></div>
-          </button>
-                    @if (pendingStockRecordDelete() === record.symbol) {
-            <div class="record-delete-confirm" (click)="$event.stopPropagation()">
-              <span>僅刪除追蹤記錄，持倉與預設單會保留</span>
-              <button type="button" class="ghost-button confirm" (click)="removeStockRecord(record.symbol, $event)">確認刪除</button>
-              <button type="button" class="ghost-button" (click)="cancelRemoveStockRecord($event)">取消</button>
-            </div>
-          } @else {
-            <details class="record-menu" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()"><summary [attr.aria-label]="record.symbol + ' 的更多操作'">⋯</summary><button type="button" class="record-remove" (click)="requestRemoveStockRecord(record.symbol, $event)" [attr.aria-label]="'刪除 ' + record.symbol + ' 個股記錄'">刪除追蹤記錄</button></details>
-          }
-        </div>
-      } @empty {
-        <p class="record-empty">輸入股票代號，建立第一筆股票記錄。</p>
-      }
-    </div>
-  </section>
-
   <section class="portfolio-dashboard" [class.valuation-updating]="isLoadingQuote()" [attr.aria-busy]="isLoadingQuote()" aria-labelledby="portfolio-dashboard-title">
     @if (isLoadingQuote()) { <p role="status">行情更新中，資產試算待報價確認後顯示。</p> }
     @if (hasSamplePositions()) {
@@ -115,14 +84,14 @@
         @else { <button type="button" class="ghost-button" (click)="confirmRemoveSamples.set(true)">移除示意持倉</button> }
       </div>
     }
-    <div class="portfolio-dashboard-heading"><div><span class="eyebrow">投資組合</span><h2 id="portfolio-dashboard-title">資產與風險總覽</h2></div><span>預設單成交後即時試算</span></div>
+    <div class="portfolio-dashboard-heading"><div><span class="eyebrow">投資組合</span><h2 id="portfolio-dashboard-title">資產與風險總覽</h2></div><span>待成交委託成交後即時試算</span></div>
     @if (estimatedPriceSymbols().length) { <p class="portfolio-warning">{{ estimatedPriceSymbols().join('、') }} 缺少行情，資產與曝險暫按該股票持倉加權進場價估計；不是即時市值。請選取股票取得行情。</p> }
+    <div class="portfolio-metrics"><div><span>未實現損益</span><strong>{{ portfolioUnrealizedProfit() | number:'1.0-0' }}</strong></div><div><span>已實現損益</span><strong>{{ portfolioRealizedProfit() | number:'1.0-0' }}</strong></div><div><span>規劃資金</span><strong>{{ availableCash() | number:'1.0-0' }}</strong></div><div><span>淨曝險</span><strong>{{ portfolioExposure().net | number:'1.0-0' }}</strong></div></div>
+    <details class="export-settings"><summary>更多資產與曝險數據</summary>
     <div class="portfolio-metrics">
       <div><span>持倉成本</span><strong>{{ portfolioCost() | number:'1.0-0' }}</strong></div>
       <div><span>目前市值</span><strong>{{ portfolioMarketValue() | number:'1.0-0' }}</strong></div>
-      <div><span>未實現損益</span><strong [class.positive]="portfolioUnrealizedProfit() >= 0" [class.negative]="portfolioUnrealizedProfit() < 0">{{ portfolioUnrealizedProfit() | number:'1.0-0' }}</strong></div>
-      <div><span>已實現損益</span><strong [class.positive]="portfolioRealizedProfit() >= 0" [class.negative]="portfolioRealizedProfit() < 0">{{ portfolioRealizedProfit() | number:'1.0-0' }}</strong></div>
-      <div><span>預設單需求</span><strong>{{ pendingOrderCapital() | number:'1.0-0' }}</strong></div>
+      <div><span>待成交委託需求</span><strong>{{ pendingOrderCapital() | number:'1.0-0' }}</strong></div>
       <div><span>成交後剩餘現金</span><strong [class.negative]="cashAfterPendingOrders() < 0">{{ cashAfterPendingOrders() | number:'1.0-0' }}</strong></div>
     </div>
 
@@ -130,9 +99,9 @@
       <div><span>多單名目金額</span><strong>{{ portfolioExposure().long | number:'1.0-0' }}</strong></div>
       <div><span>空單名目金額</span><strong>{{ portfolioExposure().short | number:'1.0-0' }}</strong></div>
       <div><span>總曝險（多＋空）</span><strong>{{ portfolioExposure().gross | number:'1.0-0' }}</strong></div>
-      <div><span>淨曝險（多－空）</span><strong>{{ portfolioExposure().net | number:'1.0-0' }}</strong></div>
       <div><span>空／多金額比</span><strong>{{ portfolioExposure().ratio === null ? '無多單分母' : (portfolioExposure().ratio | number:'1.1-1') + '%' }}</strong></div>
     </div>
+</details>
     <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">曝險為名目市值，不是占用資金或帳戶淨值；跨股票多空相等不代表風險抵銷。股票比重以總曝險為分母，多空不互相扣抵。</p></details>
     <details class="export-settings">
       <summary>全投資組合壓力情境 <span>{{ portfolioStress().count }} 檔有行情</span></summary>
@@ -155,7 +124,7 @@
     <details class="export-settings"><summary>日報酬相關性／Beta（比較基準 0050）</summary>
       <button type="button" class="ghost-button" [disabled]="analysisLoading()" (click)="loadDailyAnalysis()">{{ analysisLoading() ? '資料載入中…' : '載入／更新日行情分析' }}</button>
       <p role="status">{{ analysisStatus() }}</p>
-      <p class="backtest-note">Pearson 相關性及 Beta 以對齊起訖日的日收盤報酬計算；0050 是比較基準，不是完整市場指數。Beta 調整曝險＝各股票淨名目曝險×其 Beta，仍不代表風險已完全抵銷，未含預設單。</p>
+      <p class="backtest-note">Pearson 相關性及 Beta 以對齊起訖日的日收盤報酬計算；0050 是比較基準，不是完整市場指數。Beta 調整曝險＝各股票淨名目曝險×其 Beta，仍不代表風險已完全抵銷，未含待成交委託。</p>
       <div class="stress-table-wrap"><table class="stress-table"><thead><tr><th>股票</th><th>共同報酬筆數</th><th>對 0050 相關性</th><th>對 0050 Beta</th></tr></thead><tbody>
         @for (row of dailyAnalysis(); track row.symbol) { <tr><td>{{ row.symbol }}</td><td>{{ row.observations }}</td><td>{{ row.correlation === null ? '無法計算' : (row.correlation | number:'1.3-3') }}</td><td>{{ row.beta === null ? '無法計算' : (row.beta | number:'1.3-3') }}</td></tr> }
       </tbody></table></div>
@@ -181,8 +150,8 @@
         <div [class.warning]="item.weight > maxStockWeight()"><span>{{ item.symbol }}</span><div><i [style.width.%]="item.weight"></i></div><strong>{{ item.weight | number:'1.1-1' }}%</strong></div>
       }
     </div>
-    @if (cashAfterPendingOrders() < 0) { <p class="portfolio-warning">預設單全部成交將超過可用現金 {{ -cashAfterPendingOrders() | number:'1.0-0' }} 元。</p> }
-    <p class="backtest-note">預設單資金需求以完整名目價金加進場手續費計算，放空進場另含賣出稅；含目前最低費設定，不使用保證金槓桿，既有持倉賣出不先預計入現金。</p>
+    @if (cashAfterPendingOrders() < 0) { <p class="portfolio-warning">待成交委託全部成交將超過可用現金 {{ -cashAfterPendingOrders() | number:'1.0-0' }} 元。</p> }
+    <p class="backtest-note">待成交委託資金需求以完整名目價金加進場手續費計算，放空進場另含賣出稅；含目前最低費設定，不使用保證金槓桿，既有持倉賣出不先預計入現金。</p>
   </section>
 
   <section class="simulator-grid">
@@ -195,7 +164,7 @@
           <button type="button" class="chart-range-button" [disabled]="!canUpdateIntraday()" [class.active]="liveEnabled() && canUpdateIntraday()" (click)="toggleLive()" [attr.aria-pressed]="liveEnabled() && canUpdateIntraday()">{{ !canUpdateIntraday() ? '盤中更新暫停' : liveEnabled() ? '停止盤中更新' : '啟用盤中更新' }}</button>
           <label class="field compact chart-date-field">
             <span>查詢日期</span>
-            <input type="date" [max]="todayDate()" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
+            <small>日期格式：YYYY/MM/DD</small><input type="date" [max]="todayDate()" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
           </label>
           <div class="chart-range">
             @for (item of chartRangeOptions; track item) {
@@ -368,7 +337,8 @@
         </div>
         <div class="stat-pill">
           <span>成交金額</span>
-          <strong>{{ turnover() > 0 ? (turnover() | number: '1.0-0') : '無資料' }}</strong>
+          <strong [attr.title]="turnover() > 0 ? (turnover() | number:'1.0-0') + ' 元' : null">{{ turnover() >= 100000000 ? (turnover() / 100000000 | number:'1.2-2') + ' 億元' : turnover() >= 10000 ? (turnover() / 10000 | number:'1.2-2') + ' 萬元' : turnover() > 0 ? (turnover() | number:'1.0-0') + ' 元' : '無資料' }}</strong>
+          @if (turnover() > 0) { <details><summary>查看完整金額</summary><span>{{ turnover() | number:'1.0-0' }} 元</span></details> }
         </div>
         <div class="stat-pill">
           <span>成交量</span>
@@ -379,16 +349,16 @@
 
     <article id="strategy-board" class="panel board-panel" [class.collapsed]="collapsedPanels().has('board')">
       <div class="panel-header">
-        <div><span class="section-eyebrow">短線模擬 × 座標下單</span><h2>{{ stockSymbol() }} · {{ stockName() || '名稱待取得' }} 策略下單板</h2></div>
-        <div class="panel-header-actions"><span class="badge">{{ stockSymbol() }} · {{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><button type="button" class="collapse-button" (click)="togglePanel('board')" [attr.aria-expanded]="!collapsedPanels().has('board')" aria-label="收合近期策略下單板">⌃</button></div>
+        <div><h2>{{ stockLabel(stockSymbol(), stockName()) }} 交易規劃</h2></div>
+        <div class="panel-header-actions"><span class="badge">{{ stockSymbol() }} · {{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆待成交委託</span><button type="button" class="collapse-button" (click)="togglePanel('board')" [attr.aria-expanded]="!collapsedPanels().has('board')" aria-label="收合交易規劃">⌃</button></div>
       </div>
 
       <div class="board-layout">
         <div class="board-form">
-          <span class="section-eyebrow">委託規劃工作區</span>
+          <span class="section-eyebrow">交易規劃</span>
           <div class="order-mode-switch" role="group" aria-label="下單模式">
             <button type="button" [class.active]="orderEntryMode() === 'holding'" (click)="changeOrderMode('holding')">記錄已有持倉</button>
-            <button type="button" [class.active]="orderEntryMode() === 'preset'" (click)="changeOrderMode('preset')">規劃預設單</button>
+            <button type="button" [class.active]="orderEntryMode() === 'preset'" (click)="changeOrderMode('preset')">建立部位</button>
             <button type="button" [class.active]="orderEntryMode() === 'reduce'" (click)="changeOrderMode('reduce')">減少部位（賣出／回補）</button>
           </div>
           @if (orderEntryMode() === 'reduce') {
@@ -396,11 +366,13 @@
             @for (position of currentStockPositions(); track position.id) {
               <div class="export-settings"><strong>{{ position.type }} · {{ position.shares | number:'1.0-0' }} 股</strong><p>進場 {{ position.entryPrice | number:'1.0-2' }} 元 · {{ displayDate(position.tradeDate) }}</p>
                 <button type="button" class="ghost-button" (click)="closeTradePosition(position)">{{ position.type === '空單' || position.type === '融券' ? '記錄實際回補' : '記錄實際賣出' }}</button>
+                @if (position.type === '空單' || position.type === '融券') { <p class="backtest-note">目前僅支援成交後記錄</p> }
                 @if (position.type === '現股多單' || position.type === '融資') { <button type="button" class="ghost-button" (click)="planPositionSale(position)">規劃賣出委託</button> }
               </div>
             } @empty { <p class="record-empty">目前股票沒有持倉。請先記錄已成交部位，或切換股票。</p> }
             <p class="backtest-note">空單／融券可記錄回補成交；目前尚未提供預設回補委託。</p>
           } @else {
+          @if (orderEntryMode() === 'preset' && presetOrderAction() === 'sell') { <p>賣出委託規劃 <button type="button" class="ghost-button" (click)="changeOrderMode('reduce')">返回減少部位</button></p> }
           <p class="backtest-note">{{ orderEntryMode() === 'holding' ? '記錄已成交的持倉，用於追蹤損益。' : '規劃尚未成交的委託；同一天可以建立多個價位。' }} 本頁操作不會送出券商委託。</p>
           @if (editingPositionId() || editingPresetOrderId()) { <p class="record-status">正在編輯既有記錄 <button type="button" class="ghost-button" (click)="cancelOrderEdit()">取消編輯</button></p> }
           <div class="field-grid">
@@ -409,17 +381,9 @@
               <input [attr.aria-invalid]="!!orderFieldError('symbol')" [attr.aria-describedby]="orderFieldError('symbol') ? 'symbol-input-error' : null" type="text" [value]="positionForm().symbol" (input)="onPositionFieldChange('symbol', $any($event.target).value)" />
             @if (orderFieldError('symbol')) { <small id="symbol-input-error" class="error-text" role="alert">{{ orderFieldError('symbol') }}</small> }</label>
             @if (orderEntryMode() === 'holding') {
-              <label class="field"><span>入倉日期</span><input aria-label="入倉日期" type="date" [max]="todayDate()" [attr.aria-invalid]="!!orderFieldError('tradeDate')" [attr.aria-describedby]="orderFieldError('tradeDate') ? 'trade-date-error' : null" [value]="positionForm().tradeDate" (change)="onPositionFieldChange('tradeDate', $any($event.target).value)" />@if (orderFieldError('tradeDate')) { <small id="trade-date-error" class="error-text" role="alert">{{ orderFieldError('tradeDate') }}</small> }</label>
+              <label class="field"><span>入倉日期</span><small>日期格式：YYYY/MM/DD</small><input aria-label="入倉日期" type="date" [max]="todayDate()" [attr.aria-invalid]="!!orderFieldError('tradeDate')" [attr.aria-describedby]="orderFieldError('tradeDate') ? 'trade-date-error' : null" [value]="positionForm().tradeDate" (change)="onPositionFieldChange('tradeDate', $any($event.target).value)" />@if (orderFieldError('tradeDate')) { <small id="trade-date-error" class="error-text" role="alert">{{ orderFieldError('tradeDate') }}</small> }</label>
             }
-            @if (orderEntryMode() === 'preset') {
-              <label class="field">
-                <span>下單目的</span>
-                <select [value]="presetOrderAction()" (change)="onPresetOrderActionChange($any($event.target).value)">
-                  <option value="buy">建立部位</option>
-                  <option value="sell" [disabled]="!canCreateSellPreset()">減少多單部位（賣出）</option>
-                </select>
-              </label>
-            }
+
             <label class="field">
               <span>{{ orderEntryMode() === 'preset' ? '交易類型' : '持倉方向' }}</span>
               <select [value]="positionForm().type" (change)="onPositionFieldChange('type', $any($event.target).value)">
@@ -450,7 +414,7 @@
               @if (presetOrderAction() === 'buy') {
               <label class="field"><span>預計出場價（選填）</span><input [attr.aria-invalid]="orderEntryMode() === 'preset' && pricePlanningError().includes('目標') ? true : null" [attr.aria-describedby]="orderEntryMode() === 'preset' && pricePlanningError().includes('目標') ? 'targetPrice-error' : null" type="number" [value]="positionForm().targetPrice || ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 0))" />@if (orderEntryMode() === 'preset' && pricePlanningError().includes('目標')) { <small id="targetPrice-error" class="error-text" role="alert">{{ pricePlanningError() }}</small> }@if (orderFieldError('targetPrice')) { <small id="targetPrice-input-error" class="error-text" role="alert">{{ orderFieldError('targetPrice') }}</small> }</label>
               }
-              <label class="field"><span>預設單有效日</span><small>首個可交易日起 5 日，排除週末及已知休市日</small><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
+              <label class="field"><span>待成交委託有效日</span><small>首個可交易日起 5 日，排除週末及已知休市日</small><small>日期格式：YYYY/MM/DD</small><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
               <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">日曆依證交所 2026 年開休市表（2026/10/09 核對），不自動包含颱風等臨時停市；仍需核對市場公告。</p></details>
               @if (calendarCoverageWarning()) { <p class="error-text">此日期範圍含未載入官方日曆的年份，目前僅排除週末，請自行核對有效日。</p> }
             }
@@ -459,12 +423,13 @@
               <input type="text" [value]="positionForm().note" (input)="onPositionFieldChange('note', $any($event.target).value)" />
             </label>
           </div>
+          @if (orderEntryMode() === 'preset' && presetOrderAction() === 'buy') { <button type="button" class="ghost-button" [disabled]="positionForm().entryPrice <= 0" (click)="resetDirectionPrices()">依{{ positionForm().type === '空單' || positionForm().type === '融券' ? '空單' : '多單' }}方向重設價格</button> }
           <button type="button" class="ghost-button" (click)="useCurrentMarketPrice()">帶入目前股價</button>
           <p class="record-status">{{ positionForm().symbol }} · {{ positionForm().type }} · {{ positionForm().shares | number:'1.0-0' }} 股 × {{ positionForm().entryPrice | number:'1.0-2' }} 元 · 金額 {{ positionForm().shares * positionForm().entryPrice | number:'1.0-0' }} 元（未含交易成本）</p>
           @if (orderFormError() && !orderFieldError('symbol') && !orderFieldError('entryPrice') && !orderFieldError('shares') && !orderFieldError('stopLossPrice') && !orderFieldError('targetPrice')) { <p class="error-text" role="alert">{{ orderFormError() }}</p> }
           @if (orderEntryMode() === 'preset' && presetOrderAction() === 'sell') {
             <p class="record-status">{{ positionForm().type }} 持倉 {{ matchingSellHoldings() }} 股 · 其他有效賣出單 {{ reservedSellShares() }} 股 · 本單可委託 {{ availableSellOrderShares() }} 股</p>
-            <p class="record-status">預估出場淨損益（從入場起算） {{ sellPlanProfit() === null ? '請先確認股數與價格' : (sellPlanProfit() | number:'1.0-2') }} 元；按今日持有天數估算成本。</p><p class="backtest-note">依同股票、同交易類型合計，編輯時排除本單；已知過期單不占用額度。多筆賣出單視為都可能成交，不假設互斥。</p>
+            <p class="record-status">預估出場淨損益（從入場起算） @if (sellPlanProfit() === null) { 暫無法計算 } @else { {{ sellPlanProfit() | number:'1.0-2' }} 元 }；按今日持有天數估算成本。</p><p class="backtest-note">依同股票、同交易類型合計，編輯時排除本單；已知過期單不占用額度。多筆賣出單視為都可能成交，不假設互斥。</p>
           }
 
           @if (orderStatus()) { <p class="record-status" role="status">{{ orderStatus() }}</p> }
@@ -482,7 +447,7 @@
           @if (orderEntryMode() === 'holding') {
             <button type="button" class="action-button" [disabled]="!!orderFormError()" (click)="addTradePosition()">{{ editingPositionId() ? '儲存持倉修改' : '新增已入倉股票' }}</button>
           } @else {
-            <button type="button" class="preset-button form-submit" [disabled]="!!orderFormError() || !!pricePlanningError()" (click)="createPresetOrderFromForm()">{{ editingPresetOrderId() ? '儲存預設單修改' : (presetOrderAction() === 'sell' ? '建立賣出委託' : positionForm().type === '空單' || positionForm().type === '融券' ? '建立放空委託' : '建立買進委託') }}</button>
+            <button type="button" class="preset-button form-submit" [disabled]="!!orderFormError() || !!pricePlanningError()" (click)="createPresetOrderFromForm()">{{ editingPresetOrderId() ? '儲存待成交委託修改' : (presetOrderAction() === 'sell' ? '建立賣出委託' : positionForm().type === '空單' || positionForm().type === '融券' ? '建立放空委託' : '建立買進委託') }}</button>
           }
           }
         </div>
@@ -490,7 +455,7 @@
           <div class="chart-range" role="group" aria-label="座標圖顯示範圍">
             <button type="button" class="chart-range-button" [class.active]="boardView() === 'all'" [attr.aria-pressed]="boardView() === 'all'" (click)="changeBoardView('all')">全部</button>
             <button type="button" class="chart-range-button" [class.active]="boardView() === 'positions'" [attr.aria-pressed]="boardView() === 'positions'" (click)="changeBoardView('positions')">持倉（{{ currentStockPositions().length }}）</button>
-            <button type="button" class="chart-range-button" [class.active]="boardView() === 'presets'" [attr.aria-pressed]="boardView() === 'presets'" (click)="changeBoardView('presets')">預設單（{{ currentStockPresetOrders().length }}）</button>
+            <button type="button" class="chart-range-button" [class.active]="boardView() === 'presets'" [attr.aria-pressed]="boardView() === 'presets'" (click)="changeBoardView('presets')">待成交委託（{{ currentStockPresetOrders().length }}）</button>
           </div>
           <p class="backtest-note">僅顯示 {{ stockSymbol() }}；切換範圍不改變座標刻度或損益計算。</p>
           @if (!visibleBoardMarkers().length && !visiblePresetMarkers().length) { <p class="record-empty">目前範圍沒有記錄，可在右側表單新增。</p> }
@@ -504,7 +469,7 @@
           }
           @if (selectedBoardRecord(); as selected) {
             <div class="board-record-actions" [style.left.px]="selected.x" [style.top.px]="selected.y">
-              <strong>{{ selected.kind === 'position' ? '單筆持倉' : '預設單' }}</strong>
+              <strong>{{ selected.kind === 'position' ? '單筆持倉' : '待成交委託' }}</strong>
               @if (pendingBoardRecordDelete() === selected.id) {
                 <span>確定刪除這筆記錄？</span>
                 <button type="button" class="confirm" (click)="confirmSelectedBoardRecordDelete()">確認刪除</button>
@@ -537,7 +502,7 @@
             <text x="115" y="270" fill="#8fa7ca" font-size="10">既有持倉（不按時間）</text>
             <text x="280" y="270" fill="#91a7c9" font-size="10">今天 {{ boardAxis().startLabel }}</text>
             <text x="690" y="270" fill="#91a7c9" font-size="10">{{ boardAxis().endLabel }}</text>
-            <text x="475" y="294" fill="#879bbc" font-size="10">近期預設單時間軸</text>
+            <text x="475" y="294" fill="#879bbc" font-size="10">近期待成交委託時間軸</text>
             @for (marker of visibleBoardMarkers(); track marker.id) {
               <g (click)="selectBoardRecord(marker.id, 'position', marker.x, marker.y)" (dblclick)="editTradePosition(marker.position)">
                 <circle
@@ -562,7 +527,7 @@
               </g>
             }
           </svg>
-          <div class="board-legend"><span><i class="legend-dot long"></i>做多／融資</span><span><i class="legend-dot short"></i>做空／融券</span><span><i class="legend-diamond"></i>近期預設單</span><em>既有持倉不按時間定位；預設單依到期日顯示</em></div>
+          <div class="board-legend"><span><i class="legend-dot long"></i>做多／融資</span><span><i class="legend-dot short"></i>做空／融券</span><span><i class="legend-diamond"></i>近期待成交委託</span><em>既有持倉不按時間定位；待成交委託依到期日顯示</em></div>
         </details>
       </div>
 
@@ -571,8 +536,8 @@
         <p class="error-text" role="alert">{{ group.symbol }} {{ group.type }} 的有效賣出委託 {{ group.reserved }} 股超過持倉 {{ group.held }} 股，請調整或取消委託。</p>
       }
       @if (currentStockPresetOrders().length) {
-        <section class="preset-order-list" aria-label="近期預設單">
-          <div class="preset-list-title"><h3>近期預設單</h3><span>虛線菱形已同步顯示於座標圖</span></div>
+        <section class="preset-order-list" aria-label="近期待成交委託">
+          <div class="preset-list-title"><h3>近期待成交委託</h3><span>虛線菱形已同步顯示於座標圖</span></div>
           @for (order of currentStockPresetOrders(); track order.id) {
             <div class="preset-order-row">
               <span class="preset-status">{{ order.action === 'sell' ? '預設賣出' : '預設買入' }}</span><strong>{{ order.symbol }} · {{ order.type }}</strong><span>委託 {{ order.entryPrice | number:'1.0-2' }}</span><span>{{ order.exitPrice ? ('預計出場 ' + (order.exitPrice | number:'1.0-2')) : '未設定出場價' }}</span><span>{{ order.shareUnit === 'oddLot' ? '零股' : '整張' }} · {{ order.shares | number:'1.0-0' }} 股</span><span>有效至 {{ order.expiryDate || order.validDays + ' 天' }}</span>
@@ -583,7 +548,7 @@
               <button type="button" class="ghost-button" (click)="startPresetFill(order)">記錄實際成交</button>
               @if (fillOrderId() === order.id) {
                 <div class="field-grid">
-                  <label class="field"><span>實際成交日期</span><input type="date" [max]="todayDate()" [value]="fillDate()" (change)="fillDate.set($any($event.target).value)" /></label>
+                  <label class="field"><span>實際成交日期</span><small>日期格式：YYYY/MM/DD</small><input type="date" [max]="todayDate()" [value]="fillDate()" (change)="fillDate.set($any($event.target).value)" /></label>
                   <label class="field"><span>實際成交價</span><input type="number" min="0.01" step="0.01" [value]="fillPrice()" (input)="fillPrice.set(+$any($event.target).value)" /></label>
                   <label class="field"><span>本次成交股數（最多 {{ order.shares }} 股）</span><input type="number" min="1" [max]="order.shares" step="1" [value]="fillShares()" (input)="fillShares.set(+$any($event.target).value)" /></label>
                 </div>
@@ -592,9 +557,9 @@
               }
               <button type="button" class="ghost-button" (click)="copyPresetOrder(order)">複製成另一價位</button>
               @if (pendingPresetCancel() === order.id) {
-                <span>確認取消這筆預設單？</span><button type="button" class="ghost-button" (click)="removePresetOrder(order.id)">確認取消</button><button type="button" class="ghost-button" (click)="pendingPresetCancel.set(null)">保留</button>
+                <span>確認取消這筆待成交委託？</span><button type="button" class="ghost-button" (click)="removePresetOrder(order.id)">確認取消</button><button type="button" class="ghost-button" (click)="pendingPresetCancel.set(null)">保留</button>
               } @else {
-                <button type="button" class="ghost-button" (click)="pendingPresetCancel.set(order.id)">取消預設單</button>
+                <button type="button" class="ghost-button" (click)="pendingPresetCancel.set(order.id)">取消待成交委託</button>
               }
             </div>
           }
@@ -617,7 +582,7 @@
             @for (order of orderHistory(); track order.id) { <tr><td>{{ order.symbol }}</td><td>{{ order.action === 'sell' ? '賣出' : '買進' }} · {{ order.type }}</td><td>{{ order.entryPrice | number:'1.0-2' }}</td><td>{{ order.shares }}</td><td>{{ order.status }}</td><td>{{ order.expiryDate ? displayDate(order.expiryDate) : '未設定' }}</td></tr> }
           </tbody></table></div><p class="backtest-note">取消與已成交單不再計入資金或情境；取消股數為取消當時剩餘量。僅保留新版本後的結束紀錄，舊版已刪除委託無法補回。</p>
         </details>
-        <div class="preset-list-title"><h3 id="fill-history-title">預設單成交紀錄</h3>
+        <div class="preset-list-title"><h3 id="fill-history-title">委託成交紀錄</h3>
           <button type="button" class="ghost-button" [disabled]="exportingExcel() || !visiblePresetFills().length" (click)="exportPresetOrdersExcel(true)">{{ exportingExcel() ? 'Excel 產生中…' : '匯出成交紀錄（' + visiblePresetFills().length + ' 筆）' }}</button>
           <label>顯示範圍 <select [value]="fillHistoryScope()" (change)="fillHistoryScope.set($any($event.target).value)"><option value="current">目前股票</option><option value="all">全部股票</option></select></label>
         </div>
@@ -628,32 +593,26 @@
           <tbody>
           @for (fill of visiblePresetFills(); track fill.id) {
             <tr><td>{{ displayDate(fill.date) }}</td><td>{{ fill.symbol }} · {{ fill.action === 'sell' ? '賣出' : '買進' }} · {{ fill.type }}</td><td>{{ fill.plannedPrice | number:'1.0-2' }}</td><td>{{ fill.price | number:'1.0-2' }}</td><td>{{ fill.shares | number:'1.0-0' }}</td><td>{{ fill.price * fill.shares | number:'1.0-0' }}</td><td>{{ fill.remainingShares | number:'1.0-0' }} 股</td><td>{{ fill.note || '—' }}</td></tr>
-          } @empty { <tr><td colspan="8">目前範圍尚無成交紀錄。在預設單按「記錄實際成交」即可開始。</td></tr> }
+          } @empty { <tr><td colspan="8">目前範圍尚無成交紀錄。在待成交委託按「記錄實際成交」即可開始。</td></tr> }
           </tbody>
         </table></div>
-} @else { <p class="record-empty">尚無成交紀錄。在預設單按「記錄實際成交」即可開始。</p> }
+} @else { <p class="record-empty">尚無成交紀錄。在待成交委託按「記錄實際成交」即可開始。</p> }
       </section>
-      <section class="stock-stress-panel" [class.collapsed]="collapsedPanels().has('stress')" aria-labelledby="stress-title">
-        <div class="panel-header"><div><span class="section-eyebrow">隔日個股風險</span><h3 id="stress-title">{{ stockSymbol() }} 持倉／預設單壓力測試</h3></div><div class="panel-header-actions"><span class="badge">{{ stressScenarios().length }} 種情境</span><button type="button" class="collapse-button" (click)="togglePanel('stress')" [attr.aria-expanded]="!collapsedPanels().has('stress')">⌃</button></div></div>
+      <section id="risk-analysis" class="stock-stress-panel" [class.collapsed]="collapsedPanels().has('stress')" aria-labelledby="stress-title">
+        <div class="panel-header"><div><span class="section-eyebrow">隔日個股風險</span><h3 id="stress-title">{{ stockSymbol() }} 風險分析</h3>@if (!isLoadingQuote() && worstStressScenario(); as worst) { <p>情境中最不利：{{ worst.name }} · 相較目前 {{ worst.changeFromNow | number:'1.0-0' }} 元</p> }</div><div class="panel-header-actions"><span class="badge">{{ stressScenarios().length }} 種情境</span><button type="button" class="collapse-button" (click)="togglePanel('stress')" [attr.aria-expanded]="!collapsedPanels().has('stress')">⌃</button></div></div>
         @if (isLoadingQuote()) { <p role="status">行情更新中，壓力情境待報價確認後顯示。</p> } @else {
-        <div class="stress-summary"><span>計算基準 <strong>{{ valuationPrice() | number:'1.0-2' }}</strong></span><span>{{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆預設單</span><span>預設買入假設成交；預設賣出於情境價達標時觸發</span></div>
+        <div class="stress-summary"><span>計算基準 <strong>{{ valuationPrice() | number:'1.0-2' }}</strong></span><span>{{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆待成交委託</span><span>預設買入假設成交；預設賣出於情境價達標時觸發</span></div>
         <div class="stress-table-wrap"><table class="stress-table stock-stress-table">
-          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>預設單影響</th><th>合計損益</th><th>情境後剩餘名目曝險</th><th>狀態</th></tr></thead>
+          <thead><tr><th>隔日情境</th><th>情境股價</th><th>現有持倉損益</th><th>待成交委託影響</th><th>合計損益</th><th>情境後剩餘名目曝險</th><th>狀態</th></tr></thead>
           <tbody>@for (scenario of stressScenarios(); track scenario.id) {
             <tr [class.warning]="scenario.severity === 'warning'" [class.critical]="scenario.severity === 'critical'">
-              <td><strong>{{ scenario.name }}</strong><small>{{ scenario.assumption }}</small></td><td>{{ scenario.scenarioPrice | number:'1.0-2' }}</td>
+              <td><button type="button" class="ghost-button" [attr.aria-expanded]="selectedStressScenario() === scenario.id" (click)="selectedStressScenario.set(selectedStressScenario() === scenario.id ? null : scenario.id)">{{ scenario.name }}</button><small>{{ scenario.assumption }}</small></td><td>{{ scenario.scenarioPrice | number:'1.0-2' }}</td>
               <td [class.positive]="scenario.holdingProfit >= 0" [class.negative]="scenario.holdingProfit < 0">{{ scenario.holdingProfit | number:'1.0-0' }}</td>
               <td [class.positive]="scenario.presetProfit >= 0" [class.negative]="scenario.presetProfit < 0">{{ scenario.presetProfit | number:'1.0-0' }}</td>
               <td [class.positive]="scenario.totalProfit >= 0" [class.negative]="scenario.totalProfit < 0"><strong>{{ scenario.totalProfit | number:'1.0-0' }}</strong></td>
               <td>{{ scenario.stressedExposure | number:'1.0-0' }}</td><td><span class="stress-status">{{ scenario.severity === 'critical' ? '高風險' : scenario.severity === 'warning' ? '注意' : '可承受' }}</span></td>
             </tr>
-          }</tbody>
-        </table></div>
-        <p class="backtest-note">僅對目前選取個股進行隔日情境試算；跳空情境不假設能在中間價位停損。</p>
-        @for (scenario of stressScenarios(); track scenario.id) {
-          <details class="export-settings">
-            <summary>{{ scenario.name }} · 逐筆計算 <span>相較目前 {{ scenario.changeFromNow | number:'1.0-0' }} 元</span></summary>
-            <p class="backtest-note">累計損益從原入場價起算；相較目前＝情境合計減目前持倉按同一成本設定估值的損益，包含假設新單進場影響，不代表最大可能損失。成本欄是該筆假設的完整成本，不另加入損益贡献。</p>
+            @if (selectedStressScenario() === scenario.id) { <tr><td colspan="7">            <p class="backtest-note">累計損益從原入場價起算；相較目前＝情境合計減目前持倉按同一成本設定估值的損益，包含假設新單進場影響，不代表最大可能損失。成本欄是該筆假設的完整成本，不另加入損益贡献。</p>
             <div class="stress-table-wrap"><table class="stress-table">
               <thead><tr><th>記錄／方向</th><th>股數</th><th>入場價</th><th>假設出場／估值價</th><th>條件</th><th>估計成本</th><th>損益貢獻</th><th>剩餘股數</th></tr></thead>
               <tbody>@for (detail of scenario.details; track $index) {
@@ -661,9 +620,11 @@
               }</tbody>
             </table></div>
             <p>損益貢獻合計：{{ scenario.totalProfit | number:'1.0-2' }} 元</p>
-            <p class="backtest-note">所有進場預設單仍假設成交。逐步情境先處理持倉停損／目標，再處理預設賣出，只扣減尚未出場的同交易類型持倉；此順序是模型假設，未還原真實盤中路徑。跳空僅按情境價估值，不假設停損成交。剩餘曝險＝情境價格×尚未出場股數，多空金額相加。</p>
-          </details>
-        }
+            <p class="backtest-note">所有進場待成交委託仍假設成交。逐步情境先處理持倉停損／目標，再處理預設賣出，只扣減尚未出場的同交易類型持倉；此順序是模型假設，未還原真實盤中路徑。跳空僅按情境價估值，不假設停損成交。剩餘曝險＝情境價格×尚未出場股數，多空金額相加。</p></td></tr> }
+          }</tbody>
+        </table></div>
+        <p class="backtest-note">僅對目前選取個股進行隔日情境試算；跳空情境不假設能在中間價位停損。</p>
+
         }
       </section>
 
@@ -676,6 +637,7 @@
       @if (closingPosition(); as position) {
         <dialog id="position-close-dialog" class="close-dialog" aria-label="實際平倉確認" (cancel)="$event.preventDefault(); dismissPositionClose()">
           <h3>{{ position.symbol }} · {{ position.type }} · {{ closingIsShort() ? '記錄回補' : '記錄平倉' }}</h3>
+          <p class="backtest-note">日期格式：YYYY/MM/DD（日期選擇器依瀏覽器地區顯示）</p>
           <div class="field-grid">
             <label class="field"><span>實際成交日期</span><input [attr.aria-invalid]="!!closingFieldError('date')" [attr.aria-describedby]="closingFieldError('date') ? 'close-date-error' : null" aria-label="實際成交日期" type="date" [min]="position.tradeDate || ''" [max]="todayDate()" [value]="closingDate()" (change)="closingDate.set($any($event.target).value)" />@if (closingFieldError('date')) { <small id="close-date-error" class="error-text" role="alert">{{ closingFieldError('date') }}</small> }</label>
             <label class="field"><span>實際成交價</span><input [attr.aria-invalid]="!!closingFieldError('price')" [attr.aria-describedby]="closingFieldError('price') ? 'close-price-error' : null" aria-label="實際成交價" type="number" min="0.01" step="0.01" [value]="closingPrice()" (input)="closingPrice.set(+$any($event.target).value)" />@if (closingFieldError('price')) { <small id="close-price-error" class="error-text" role="alert">{{ closingFieldError('price') }}</small> }</label>
@@ -691,6 +653,7 @@
           <button type="button" class="ghost-button" (click)="dismissPositionClose()">返回，不變更持倉</button>
         </dialog>
       }
+      @defer (on viewport; prefetch on idle) {
       <app-position-details
         [positions]="visibleHoldingPositions()"
         [currentSymbol]="stockSymbol()"
@@ -707,6 +670,7 @@
         (positionDelete)="removeTradePosition($event)"
         (positionGroupDelete)="deletePositionGroup($event)"
       />
+      } @placeholder { <p class="record-empty">持倉明細於查看時載入。</p> } @loading { <p role="status">持倉明細載入中…</p> } @error { <p role="alert">持倉明細載入失敗，請重新整理頁面。</p> }
       <section class="future-layout" [class.collapsed]="collapsedPanels().has('future')">
         <div class="future-layout-heading"><div><span class="section-eyebrow">目前個股</span><h3>{{ stockSymbol() }} 整檔情境試算</h3></div><button type="button" class="collapse-button" (click)="togglePanel('future')" [attr.aria-expanded]="!collapsedPanels().has('future')">⌃</button></div>
         <div class="future-layout-content">
@@ -736,7 +700,7 @@
 
     <details class="panel backtest-panel historical-analysis"><summary>歷史分析（單筆策略／區間多空）</summary>
       <div class="panel-header"><h2>單筆策略歷史模擬</h2><span class="badge">{{ chartDays() }} 日 · {{ positionForm().type }}</span></div>
-      <p class="backtest-note">將目前表單規劃套用到所選歷史區間，僅模擬一次進場／出場，不使用預設單有效日，也不回寫持倉。股票必須與行情一致。資金使用可用現金，全名目部位、不使用槓桿。</p>
+      <p class="backtest-note">將目前表單規劃套用到所選歷史區間，僅模擬一次進場／出場，不使用待成交委託有效日，也不回寫持倉。股票必須與行情一致。資金使用可用現金，全名目部位、不使用槓桿。</p>
       @if (positionForm().symbol !== stockSymbol()) { <p class="error-text">表單股票與圖表股票不同，請先選取同一股票。</p> }
       @else if (plannedTradeResult().error) { <p class="error-text">{{ plannedTradeResult().error }}</p> }
       @else {
@@ -757,12 +721,46 @@
           <div><span>Profit Factor</span><strong>{{ backtestResult().profitFactor | number:'1.2-2' }}</strong></div>
           <div><span>模擬期末權益</span><strong>{{ backtestResult().endingEquity | number:'1.0-0' }}</strong></div>
         </div>
-        <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">依 {{ positionForm().type }} 方向逐日收盤報酬複利計算，初始權益 100,000 元，不含成本與槓桿；未使用預設單、停損或目標條件。非虧損日比例包含平盤日，空單採反向日報酬；Profit Factor 是逐日獲利總和／逐日虧損絕對值總和；最大回撤取此模擬權益曲線。</p></details>
+        <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">依 {{ positionForm().type }} 方向逐日收盤報酬複利計算，初始權益 100,000 元，不含成本與槓桿；未使用待成交委託、停損或目標條件。非虧損日比例包含平盤日，空單採反向日報酬；Profit Factor 是逐日獲利總和／逐日虧損絕對值總和；最大回撤取此模擬權益曲線。</p></details>
       } @else { <p class="record-empty">歷史資料不足，無法執行回測。</p> }
     </article>
     </details>
   </section>
   <section id="workspace-settings" class="stock-record-panel"><details class="export-settings"><summary>帳戶與成本設定</summary>
+    <div class="stock-record-heading workspace-controls" aria-label="資料儲存控制">
+      <div><strong>資料儲存</strong><p class="backtest-note">保存在目前瀏覽器，重新開啟會還原；尚未送出的表單內容不包含在儲存範圍。</p></div>
+      <div class="panel-header-actions">
+        <label><input type="checkbox" [checked]="autoSaveEnabled()" (change)="autoSaveEnabled.set($any($event.target).checked)" /> 自動儲存</label>
+        <button type="button" class="ghost-button" (click)="saveWorkspace()">立即儲存</button>
+        <button type="button" class="save-workspace-button" (click)="downloadWorkspaceBackup()">下載資料備份</button>
+        <button type="button" class="save-workspace-button" (click)="backupFile.click()">匯入備份</button>
+        <button type="button" class="save-workspace-button" (click)="previewBeforeImportBackup()">還原前備份</button>
+        <input #backupFile type="file" accept=".json,application/json" hidden (change)="readWorkspaceBackup($event)" />
+      </div>
+    </div>
+    @if (backupStatus()) { <p class="record-status" role="status">{{ backupStatus() }}</p> }
+    @if (importPreview(); as preview) {
+      <div class="export-settings"><strong>還原 {{ preview.filename }}</strong><p>{{ preview.stocks }} 檔股票 · {{ preview.positions }} 筆持倉 · {{ preview.orders }} 筆待成交委託 · {{ preview.fills }} 筆成交紀錄</p>
+        <p>確認後將取代目前工作區，不合併資料。</p><button type="button" class="ghost-button" (click)="confirmWorkspaceImport()">確認取代並還原</button><button type="button" class="ghost-button" (click)="importPreview.set(null)">取消，保留目前資料</button>
+      </div>
+    }
+
+
+    <details class="export-settings">
+    <summary>待成交委託 Excel 匯出 <span>{{ excelPreview().count }} 筆可匯出</span></summary>
+    <div class="stock-record-heading" aria-label="待成交委託 Excel 匯出設定">
+      <div><strong>待成交委託 Excel</strong><p class="backtest-note">每個價位各列一筆，買進與賣出分開統計；金額未含交易成本。</p></div>
+      <div class="panel-header-actions">
+        <label>匯出範圍 <select [value]="excelScope()" [disabled]="exportingExcel()" (change)="excelScope.set($any($event.target).value)"><option value="all">全部股票</option><option value="current">目前股票 {{ stockSymbol() }}</option></select></label>
+        <label><input type="checkbox" [checked]="excelIncludeExpired()" [disabled]="exportingExcel()" (change)="excelIncludeExpired.set($any($event.target).checked)" /> 包含過期單</label>
+        <button type="button" class="save-workspace-button" [disabled]="exportingExcel() || !excelPreview().count" (click)="exportPresetOrdersExcel()">{{ exportingExcel() ? 'Excel 產生中…' : '匯出 Excel（' + excelPreview().count + ' 筆）' }}</button>
+      </div>
+    </div>
+    <p class="record-status" role="status">{{ excelPreview().count }} 筆 · {{ excelPreview().symbols }} 檔股票 · 買進委託金額 {{ excelPreview().buyAmount | number:'1.0-0' }} 元 · 賣出委託金額 {{ excelPreview().sellAmount | number:'1.0-0' }} 元</p>
+    @if (excelPreview().unknownExpiry) { <p class="backtest-note">{{ excelPreview().unknownExpiry }} 筆未設定有效日期，無法判定是否過期，仍會匯出。</p> }
+    @if (!excelPreview().count) { <p class="record-empty">目前範圍沒有可匯出的待成交委託，可切換股票範圍、勾選包含過期單，或先建立待成交委託。</p> }
+    </details>
+
     <div class="portfolio-controls">
       <label class="field"><span>可用現金</span><input type="number" min="0" [value]="availableCash()" (input)="updateNumericSetting('availableCash', $any($event.target).value)" /></label>
       <label class="field"><span>每筆最大可承受虧損</span><input type="number" min="1" [value]="maxRiskPerTrade()" (input)="updateNumericSetting('maxRiskPerTrade', $any($event.target).value)" /></label>

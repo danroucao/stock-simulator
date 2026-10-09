@@ -149,6 +149,7 @@ export class App {
     event.preventDefault();
     const panels = new Set(this.collapsedPanels());
     panels.delete(targetId === 'market-chart' ? 'chart' : 'board');
+    if (targetId === 'risk-analysis') panels.delete('stress');
     this.collapsedPanels.set(panels);
     afterNextRender(() => {
       const target = document.getElementById(targetId);
@@ -276,7 +277,7 @@ export class App {
   }
   protected readonly historyLoading = signal(false);
   protected readonly historyError = signal('');
-  protected readonly chartIndicators = signal({ obv: true, adl: true, histogram: true });
+  protected readonly chartIndicators = signal({ obv: false, adl: false, histogram: false });
   protected toggleChartIndicator(key: 'obv' | 'adl' | 'histogram'): void {
     this.chartIndicators.update(value => ({ ...value, [key]: !value[key] }));
   }
@@ -334,10 +335,13 @@ export class App {
   protected readonly pendingBoardRecordDelete = signal<string | null>(null);
   protected readonly orderEntryMode = signal<'holding' | 'preset' | 'reduce'>('holding');
   private orderDraftEdited = false;
+  private readonly editedPlanningPrices = new Set<string>();
   protected readonly presetOrderAction = signal<PresetOrderAction>('buy');
   protected readonly shareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly simulationShareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
-  protected readonly collapsedPanels = signal<Set<string>>(new Set(['future', 'backtest']));
+  protected readonly collapsedPanels = signal<Set<string>>(new Set(['future', 'backtest', 'stress']));
+  protected readonly selectedStressScenario = signal<string | null>(null);
+  protected readonly worstStressScenario = computed(() => [...this.stressScenarios()].sort((a, b) => a.changeFromNow - b.changeFromNow)[0] ?? null);
   protected readonly saveStatus = signal('');
   protected readonly autoSaveEnabled = signal(true);
   protected readonly saveError = signal('');
@@ -564,7 +568,7 @@ export class App {
       this.tradePositions.update(items => [...items, { id, symbol: order.symbol, type: order.type, shares,
         entryFeePaid: short ? entryCosts.sellFee : entryCosts.buyFee, entryTaxPaid: short ? entryCosts.transactionTax : 0,
         entryPrice: price, targetPrice: order.exitPrice ?? price, stopLossPrice: order.stopLossPrice,
-        tradeDate: date, note: `${order.note ?? ''} 預設單成交：${order.id}`.trim() }]);
+        tradeDate: date, note: `${order.note ?? ''} 待成交委託成交：${order.id}`.trim() }]);
     }
     this.presetOrders.update(items => items.flatMap(item => item.id !== order.id ? [item] : item.shares > shares ? [{ ...item, shares: item.shares - shares }] : []));
     if (shares === order.shares) this.archivedPresetOrders.update(items => [...items, { ...order, shares: 0, finalStatus: '已成交', finalizedAt: new Date().toISOString() }]);
@@ -572,7 +576,7 @@ export class App {
       action: order.action ?? 'buy', date, price, shares, plannedPrice: order.entryPrice,
       remainingShares: order.shares - shares, recordedAt: new Date().toISOString(), note: order.note ?? '' }]);
     this.recordCashTrade(id, date, price, shares, order.action === 'sell', order.type);
-    this.lastTradeUndo.set({ before: undoBefore, after: this.tradeStateJson(), description: `${order.symbol} 預設單成交 ${shares} 股` });
+    this.lastTradeUndo.set({ before: undoBefore, after: this.tradeStateJson(), description: `${order.symbol} 待成交委託成交 ${shares} 股` });
     this.confirmUndoTrade.set(false);
     this.undoTradeStatus.set('');
     if (this.editingPresetOrderId() === order.id) this.editingPresetOrderId.set(null);
@@ -583,7 +587,7 @@ export class App {
   protected copyPresetOrder(order: PresetOrder): void {
     this.editPresetOrder(order);
     this.editingPresetOrderId.set(null);
-    this.orderStatus.set(`已帶入 ${order.symbol} 的預設單。請調整委託價後建立新單，原單會保留。`);
+    this.orderStatus.set(`已帶入 ${order.symbol} 的待成交委託。請調整委託價後建立新單，原單會保留。`);
   }
   protected readonly orderFormError = computed(() => {
     const form = this.positionForm();
@@ -616,6 +620,7 @@ export class App {
 
   protected changeOrderMode(mode: 'holding' | 'preset' | 'reduce'): void {
     this.orderEntryMode.set(mode);
+    if (mode === 'preset') this.presetOrderAction.set('buy');
     this.editingPositionId.set(null);
     this.editingPresetOrderId.set(null);
     this.orderStatus.set('');
@@ -680,10 +685,10 @@ export class App {
       const url = URL.createObjectURL(new Blob([new Uint8Array(data)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${historyOnly ? '實際成交紀錄' : '預設單規劃'}-${scope}-${this.todayInputValue()}.xlsx`;
+      link.download = `${historyOnly ? '實際成交紀錄' : '待成交委託規劃'}-${scope}-${this.todayInputValue()}.xlsx`;
       document.body.appendChild(link);
       try { link.click(); } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-      this.backupStatus.set(historyOnly ? '已送出實際成交紀錄 Excel 下載。' : '已送出預設單 Excel 下載，包含明細、布局總覽及使用說明。');
+      this.backupStatus.set(historyOnly ? '已送出實際成交紀錄 Excel 下載。' : '已送出待成交委託 Excel 下載，包含明細、布局總覽及使用說明。');
     } catch {
       this.backupStatus.set('Excel 匯出失敗，請稍後重試。');
     } finally {
@@ -1433,7 +1438,7 @@ export class App {
         this.selectedPrice.set(quote.close);
         this.limitUpPrice.set(Math.max(quote.high, quote.close));
         this.limitDownPrice.set(Math.min(quote.low, quote.close));
-        this.stockName.set(quote.name || requestedSymbol);
+        this.stockName.set(this.stockRecords().find(record => record.symbol === requestedSymbol)?.name ?? '');
         this.quoteError.set('');
 
         if (this.stockSymbol() === requestedSymbol && !this.editingPositionId() && !this.editingPresetOrderId() && !this.orderDraftEdited) {
@@ -1583,7 +1588,7 @@ export class App {
 
   protected editPresetOrder(order: PresetOrder): void {
     this.pendingPresetCancel.set(null);
-    this.orderStatus.set(`正在編輯 ${order.symbol} 預設單，儲存後更新原單。`);
+    this.orderStatus.set(`正在編輯 ${order.symbol} 待成交委託，儲存後更新原單。`);
     this.orderEntryMode.set('preset');
     this.editingPositionId.set(null);
     this.editingPresetOrderId.set(order.id);
@@ -1614,10 +1619,29 @@ export class App {
   }
 
   protected onPositionFieldChange<K extends keyof TradePositionInput>(field: K, value: TradePositionInput[K]): void {
+    if (field === 'stopLossPrice' || field === 'targetPrice') this.editedPlanningPrices.add(field);
     this.orderDraftEdited = true;
     this.orderStatus.set('');
     this.positionForm.update((current) => ({ ...current, [field]: value }));
+    if (field === 'type' && !this.editingPositionId() && !this.editingPresetOrderId() && this.presetOrderAction() !== 'sell') {
+      const form = this.positionForm(), short = form.type === '空單' || form.type === '融券';
+      if (form.entryPrice > 0) this.positionForm.update(current => ({ ...current,
+        stopLossPrice: this.editedPlanningPrices.has('stopLossPrice') ? current.stopLossPrice : +(form.entryPrice * (short ? 1.05 : .95)).toFixed(2),
+        targetPrice: this.editedPlanningPrices.has('targetPrice') ? current.targetPrice : +(form.entryPrice * (short ? .95 : 1.05)).toFixed(2),
+      }));
+    }
   }
+
+  protected resetDirectionPrices(): void {
+    const form = this.positionForm(), short = form.type === '空單' || form.type === '融券';
+    if (!(form.entryPrice > 0)) return;
+    this.orderDraftEdited = true;
+    this.editedPlanningPrices.clear();
+    this.positionForm.update(value => ({ ...value, stopLossPrice: +(form.entryPrice * (short ? 1.05 : .95)).toFixed(2), targetPrice: +(form.entryPrice * (short ? .95 : 1.05)).toFixed(2) }));
+    this.orderStatus.set('已依方向重設停損與目標為進場價上下 5%，請自行確認。');
+  }
+
+  protected stockLabel(symbol: string, name?: string): string { return name?.trim() && name.trim() !== symbol ? `${symbol} · ${name.trim()}` : symbol; }
 
   protected onPresetOrderActionChange(value: PresetOrderAction): void {
     if (value === 'sell' && !this.canCreateSellPreset()) return;
@@ -1901,7 +1925,7 @@ export class App {
       ? orders.map((order) => order.id === editingId ? { ...updatedOrder, id: editingId, createdAt: order.createdAt } : order)
       : [...orders, updatedOrder]);
     this.editingPresetOrderId.set(null);
-    this.orderStatus.set(editingId ? '已儲存預設單修改。' : `已建立 ${symbol} ${action === 'sell' ? '賣出' : '買進'}預設單：${shares} 股 × ${form.entryPrice} 元。可修改價格後建立下一筆。`);
+    this.orderStatus.set(editingId ? '已儲存待成交委託修改。' : `已建立 ${symbol} ${action === 'sell' ? '賣出' : '買進'}待成交委託：${shares} 股 × ${form.entryPrice} 元。可修改價格後建立下一筆。`);
   }
 
   protected createPresetOrder(): void {
@@ -1924,7 +1948,7 @@ export class App {
     this.pendingPresetCancel.set(null);
     this.presetOrders.update((orders) => orders.filter((order) => order.id !== id));
     if (this.editingPresetOrderId() === id) this.editingPresetOrderId.set(null);
-    this.orderStatus.set('已取消預設單。');
+    this.orderStatus.set('已取消待成交委託。');
   }
 
   protected presetProfit(order: PresetOrder): number {
@@ -2060,11 +2084,13 @@ export class App {
 
   private syncOrderFormToStock(symbol: string, marketPrice: number): void {
     this.orderDraftEdited = false;
+    this.editedPlanningPrices.clear();
     const price = marketPrice > 0 ? marketPrice : 0;
+    const short = this.positionForm().type === '空單' || this.positionForm().type === '融券';
     const existingTargets = this.tradePositions()
       .filter((position) => position.symbol === symbol && position.targetPrice > price && (position.type === '現股多單' || position.type === '融資'))
       .map((position) => position.targetPrice);
-    const targetPrice = existingTargets.length
+    const targetPrice = short ? price * .95 : existingTargets.length
       ? existingTargets.reduce((sum, target) => sum + target, 0) / existingTargets.length
       : price * 1.05;
     this.positionForm.update((form) => ({
@@ -2072,7 +2098,7 @@ export class App {
       symbol,
       entryPrice: price,
       targetPrice: Math.round(targetPrice * 100) / 100,
-      stopLossPrice: price > 0 ? Math.round(price * 0.95 * 100) / 100 : undefined,
+      stopLossPrice: price > 0 ? Math.round(price * (short ? 1.05 : .95) * 100) / 100 : undefined,
       note: '',
       tradeDate: this.todayInputValue(),
     }));
@@ -2089,7 +2115,8 @@ export class App {
 
   private upsertStockRecord(symbol: string, name: string, latestPrice: number, change: number, quoteDate: string): void {
     this.stockRecords.update((records) => {
-      const next = { symbol, name, latestPrice, change, quoteDate };
+      const knownName = records.find(record => record.symbol === symbol)?.name || (this.stockSymbol() === symbol ? this.stockName() : '');
+      const next = { symbol, name: name && name !== symbol ? name : knownName && knownName !== symbol ? knownName : '', latestPrice, change, quoteDate };
       return records.some((record) => record.symbol === symbol)
         ? records.map((record) => record.symbol === symbol ? next : record)
         : [...records, next];
@@ -2245,7 +2272,7 @@ export class App {
             this.financingRate(), this.shortBorrowRate(), soldShares,
           );
           adjustment += realizedProfit - stressProfitForPosition(position, soldShares);
-          details.push({ label: `賣出預設單 ${order.id} → ${position.id}`, shares: soldShares, entry: position.entryPrice, exit: order.entryPrice,
+          details.push({ label: `賣出待成交委託 ${order.id} → ${position.id}`, shares: soldShares, entry: position.entryPrice, exit: order.entryPrice,
             reason: '以委託價賣出：此列為替換上述持倉估值的損益差額，勿重複加總完整損益',
             costs: this.portfolioCalculator.positionExitCosts(position, order.entryPrice, soldShares, holdingDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
             contribution: realizedProfit - stressProfitForPosition(position, soldShares) });
@@ -2258,7 +2285,7 @@ export class App {
       const remaining = this.scenarioTriggersExit(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops) ? 0 : order.shares;
       stressedShares += remaining;
       const exit = this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops);
-      details.push({ label: `進場預設單 ${order.id} · ${order.type}`, shares: order.shares, entry: order.entryPrice, exit, remaining,
+      details.push({ label: `進場待成交委託 ${order.id} · ${order.type}`, shares: order.shares, entry: order.entryPrice, exit, remaining,
         reason: '假設全部進場；' + (!respectStops ? '跳空按情境價估值' : exit !== scenarioPrice ? (exit === order.stopLossPrice ? '觸發停損' : '觸發目標') : '按情境價估值'),
         costs: this.portfolioCalculator.tradeCosts(order.entryPrice, exit, order.type, order.shares, order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
         contribution: this.portfolioCalculator.simulateOrder(order.entryPrice, exit, order.type, order.shares, order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) });

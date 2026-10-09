@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { TestBed, DeferBlockBehavior, DeferBlockState } from '@angular/core/testing';
 import { of, Subject } from 'rxjs';
 import { vi } from 'vitest';
 afterEach(() => vi.useRealTimers());
@@ -191,7 +191,7 @@ describe('App', () => {
     expect(scenario.details.length).toBe(1);
     expect(scenario.presetProfit).toBe(0);
     const gap = app.buildStockStressScenario('gap', 'gap', 'gap', -0.1, false);
-    expect(gap.details.some((row: any) => row.label.includes('賣出預設單'))).toBe(true);
+    expect(gap.details.some((row: any) => row.label.includes('賣出待成交委託'))).toBe(true);
   });
 
   it('excludes a new preset position after its target is reached', () => {
@@ -446,6 +446,7 @@ describe('App', () => {
   beforeEach(async () => {
     localStorage.clear();
     await TestBed.configureTestingModule({
+      deferBlockBehavior: DeferBlockBehavior.Manual,
       imports: [App],
       providers: [
         {
@@ -502,23 +503,23 @@ describe('App', () => {
 
   it('should render title', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('h1')?.textContent).toContain('Stock Trading Simulator');
   });
 
   it('should render grouped position profit details', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('#position-detail-title')?.textContent).toContain('持倉筆記與未實現損益');
+    expect(compiled.querySelector('#position-detail-title')?.textContent).toContain('逐筆持倉');
     expect(compiled.querySelectorAll('.position-group').length).toBe(1);
     expect(compiled.querySelectorAll('.position-profit-table tbody .position-actions-row').length).toBe(2);
   });
 
   it('should delete all holding records for one stock after confirmation', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.tradePositions.set([
       { id: 'a', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 600, targetPrice: 700, note: '' },
@@ -533,7 +534,7 @@ describe('App', () => {
 
   it('should create a near-term preset order from the unified order board', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     (compiled.querySelector('.order-mode-switch button:nth-child(2)') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -546,7 +547,7 @@ describe('App', () => {
 
   it('should create a sell preset from an existing holding without opening a short', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.orderEntryMode.set('preset');
     app.onPresetOrderActionChange('sell');
@@ -564,7 +565,7 @@ describe('App', () => {
 
   it('should edit an existing preset order without creating a duplicate', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     const order = {
       id:'edit-preset', symbol:'2330', type:'現股多單', action:'buy', shares:1000,
@@ -583,7 +584,7 @@ describe('App', () => {
 
   it('should delete the selected board record only after confirmation', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     const originalCount = app.tradePositions().length;
     const id = app.tradePositions()[0].id;
@@ -599,7 +600,7 @@ describe('App', () => {
   });
   it('should prevent sell preset orders when the selected stock has no sellable holding', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.stockSymbol.set('6182');
     app.positionForm.update((form: any) => ({ ...form, symbol:'6182' }));
@@ -612,7 +613,7 @@ describe('App', () => {
   });
   it('should validate a sell preset against the symbol entered in the form', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.orderEntryMode.set('preset');
     app.positionForm.update((form: any) => ({ ...form, symbol: '6182' }));
@@ -624,7 +625,7 @@ describe('App', () => {
   });
   it('should value existing positions with the latest quote instead of the simulated entry price', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     const firstSummary = compiled.querySelector('.position-group-header');
     // Latest mocked quote is 650; the selected simulation price can change independently.
@@ -633,7 +634,7 @@ describe('App', () => {
 
   it('should separate existing holdings while keeping price on the y-axis', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     const svgText = compiled.querySelector('.board-svg')?.textContent;
     const markers = compiled.querySelectorAll('.board-svg circle');
@@ -645,7 +646,7 @@ describe('App', () => {
 
   it('should save the selected entry date when adding a position', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     const dateInput = compiled.querySelector('.board-form input[type="date"]') as HTMLInputElement;
     dateInput.value = '2026-06-15';
@@ -658,7 +659,7 @@ describe('App', () => {
 
   it('should collapse and expand panels independently', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     const board = compiled.querySelector('.board-panel') as HTMLElement;
     const collapseButton = board.querySelector('.collapse-button') as HTMLButtonElement;
@@ -670,7 +671,7 @@ describe('App', () => {
 
   it('should render vertical candle wicks and chart axes without diagonal artifacts', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     const candleWick = compiled.querySelector('.stock-chart line[stroke-width="2"]');
     expect(candleWick?.getAttribute('x1')).toBe(candleWick?.getAttribute('x2'));
@@ -680,7 +681,7 @@ describe('App', () => {
 
   it('should use Taiwan market colors: red for rising and green for falling candles', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const fills = Array.from(fixture.nativeElement.querySelectorAll('.stock-chart rect')).map((bar: any) => bar.getAttribute('fill'));
     expect(fills).toContain('#ff6268');
     expect(fills).toContain('#38d996');
@@ -688,11 +689,11 @@ describe('App', () => {
 
   it('should use square candle bodies and switch fields by order mode', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.stock-chart rect')?.hasAttribute('rx')).toBe(false);
     expect(compiled.querySelector('.board-form')?.textContent).not.toContain('預計出場價（選填）');
-    const presetMode = Array.from(compiled.querySelectorAll('.order-mode-switch button')).find((button) => button.textContent?.includes('規劃預設單')) as HTMLButtonElement;
+    const presetMode = Array.from(compiled.querySelectorAll('.order-mode-switch button')).find((button) => button.textContent?.includes('建立部位')) as HTMLButtonElement;
     presetMode.click();
     fixture.detectChanges();
     expect(compiled.querySelector('.board-form')?.textContent).toContain('預計出場價（選填）');
@@ -701,7 +702,7 @@ describe('App', () => {
 
   it('should render long positions in red and short positions in green on the order board', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const fills = Array.from(fixture.nativeElement.querySelectorAll('.board-svg circle')).map((marker: any) => marker.getAttribute('fill'));
     expect(fills).toContain('#ff6268');
     expect(fills).toContain('#38d996');
@@ -709,7 +710,7 @@ describe('App', () => {
 
   it('should let users add and switch between multiple stock records', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const compiled = fixture.nativeElement as HTMLElement;
     const input = compiled.querySelector('.stock-record-add input') as HTMLInputElement;
     input.value = '2317';
@@ -723,7 +724,7 @@ describe('App', () => {
 
   it('should confirm and delete a stock record while preserving investment data', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     const event = { stopPropagation: vi.fn() } as any;
     app.stockRecords.set([
@@ -747,7 +748,7 @@ describe('App', () => {
   });
   it('should show every holding summary while valuing each stock with its latest price', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.latestPrices.set({ '2330': 650, '2317': 120 });
     app.tradePositions.set([{ id:'other',symbol:'2317',type:'現股多單',shares:10,entryPrice:100,targetPrice:100,note:'' }]);
@@ -757,7 +758,7 @@ describe('App', () => {
 
   it('should calculate seven next-day stress scenarios for the selected stock', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     expect(app.stressScenarios().length).toBe(7);
     expect(app.stressScenarios()[0].id).toBe('range-2');
@@ -776,7 +777,7 @@ describe('App', () => {
 
   it('should replace holding valuation with realized profit when a sell preset is triggered', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     const position = {
       id:'sell-stress-holding', symbol:'2330', type:'現股多單', shares:1000,
@@ -800,7 +801,7 @@ describe('App', () => {
 
   it('should not allocate the same holding shares to multiple sell presets', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.tradePositions.set([{
       id:'shared-holding', symbol:'2330', type:'現股多單', shares:1000,
@@ -818,7 +819,7 @@ describe('App', () => {
 
   it('should not treat a holding placeholder target equal to entry as a take-profit order', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.tradePositions.set([{
       id:'no-target', symbol:'2330', type:'現股多單', shares:1000,
@@ -831,7 +832,7 @@ describe('App', () => {
 
   it('should save stock records, holdings and preset orders to local storage', async () => {
     const fixture = TestBed.createComponent(App);
-    await fixture.whenStable();
+    await renderDeferredHoldings(fixture);
     const app = fixture.componentInstance as any;
     app.stockSymbol.set('6182');
     app.saveWorkspace();
@@ -870,4 +871,48 @@ describe('App', () => {
     expect(app.positionForm().entryPrice).toBe(0);
     expect(app.orderFieldError('entryPrice')).toContain('大於 0');
   });
+
+  it('keeps a known stock name when the provider only returns the symbol', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.stockRecords.set([{symbol:'2330',name:'台積電',latestPrice:100,change:0,quoteDate:'2026-10-08'}]);
+    app.upsertStockRecord('2330','2330',110,10,'2026-10-08');
+    expect(app.stockRecords()[0].name).toBe('台積電');
+    expect(app.stockLabel('2330','2330')).toBe('2330');
+    expect(app.stockLabel('2330','台積電')).toBe('2330 · 台積電');
+  });
+  it('keeps manual short prices until direction reset is explicitly requested', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.positionForm.update((form: any) => ({...form,entryPrice:100,stopLossPrice:95,targetPrice:110}));
+    app.onPositionFieldChange('stopLossPrice',95);
+    app.onPositionFieldChange('targetPrice',110);
+    app.onPositionFieldChange('type','空單');
+    expect(app.positionForm().stopLossPrice).toBe(95);
+    app.resetDirectionPrices();
+    expect(app.positionForm().stopLossPrice).toBe(105);
+    expect(app.positionForm().targetPrice).toBe(95);
+    app.changeOrderMode('preset');
+    expect(app.pricePlanningError()).toBe('');
+  });
+
+  it('updates only untouched planning prices when direction changes', () => {
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.syncOrderFormToStock('2330',100);
+    app.onPositionFieldChange('type','空單');
+    expect(app.positionForm().stopLossPrice).toBe(105);
+    expect(app.positionForm().targetPrice).toBe(95);
+    app.onPositionFieldChange('stopLossPrice',108);
+    app.onPositionFieldChange('type','現股多單');
+    expect(app.positionForm().stopLossPrice).toBe(108);
+    expect(app.positionForm().targetPrice).toBe(105);
+    app.syncOrderFormToStock('6182',200);
+    app.onPositionFieldChange('type','融券');
+    expect(app.positionForm().stopLossPrice).toBe(210);
+    expect(app.positionForm().targetPrice).toBe(190);
+  });
 });
+
+async function renderDeferredHoldings(fixture: any) {
+  await fixture.whenStable();
+  for (const block of await fixture.getDeferBlocks()) await block.render(DeferBlockState.Complete);
+  await fixture.whenStable();
+}

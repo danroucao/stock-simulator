@@ -12,7 +12,8 @@
     "verify:trading": "node scripts/verify-trading-flow.mjs",
     "verify:tabs": "node scripts/verify-storage-tabs.mjs",
     "verify:ui": "node scripts/verify-ui.mjs",
-    "verify:mobile": "node scripts/verify-trading-flow.mjs --mobile && node scripts/verify-edge-flows.mjs"
+    "verify:mobile": "node scripts/verify-trading-flow.mjs --mobile && node scripts/verify-edge-flows.mjs",
+    "verify:density": "node scripts/verify-workspace-density.mjs"
   },
   "private": true,
   "packageManager": "npm@11.18.0",

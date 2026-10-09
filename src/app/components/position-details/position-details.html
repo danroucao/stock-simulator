@@ -1,6 +1,6 @@
 <section class="position-detail-section" [class.quote-updating]="quoteUpdating()" [attr.aria-busy]="quoteUpdating()" aria-labelledby="position-detail-title">
   <div class="detail-section-heading">
-    <div><span class="section-eyebrow">持倉模擬面板延伸</span><h3 id="position-detail-title">持倉筆記與未實現損益</h3></div>
+    <div><span id="position-detail-title" class="screen-reader-only">逐筆持倉</span></div>
     <span>未實現損益包含預估出場成本；已平倉結果見已實現交易。</span>
   </div>
 
@@ -24,7 +24,7 @@
               <button type="button" class="delete-position-group-button confirm" (click)="confirmGroupDelete(group.symbol)">確認刪除</button>
               <button type="button" class="delete-position-group-button" (click)="cancelGroupDelete()">取消</button>
             } @else {
-              <button type="button" class="delete-position-group-button" (click)="requestGroupDelete(group.symbol)">刪除此個股持倉記錄</button>
+              <details class="position-menu"><summary [attr.aria-label]="group.symbol + ' 整檔持倉更多操作'">⋯</summary><button type="button" class="delete-position-group-button" (click)="requestGroupDelete(group.symbol)">刪除此個股持倉記錄</button></details>
             }
           </div>
           <div class="position-profit-table-wrap"><table class="position-profit-table">
@@ -47,7 +47,7 @@
                   <button type="button" class="delete-position-button confirm" (click)="confirmPositionDelete(position.id)">確認刪除</button>
                   <button type="button" class="delete-position-button" (click)="cancelPositionDelete()">取消</button>
                 } @else {
-                  <button type="button" class="delete-position-button" (click)="requestPositionDelete(position.id)">刪除單筆記錄</button>
+                  <details class="position-menu"><summary [attr.aria-label]="position.symbol + ' 持倉更多操作'">⋯</summary><button type="button" class="delete-position-button" (click)="requestPositionDelete(position.id)">刪除單筆記錄</button></details>
                   <button type="button" class="close-position-button" (click)="positionClose.emit(position)">{{ position.type === '空單' || position.type === '融券' ? '記錄回補' : '記錄平倉' }}</button>
                 }
               </td></tr>

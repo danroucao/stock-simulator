@@ -1,4 +1,8 @@
 :host { display: block; }
+.screen-reader-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.position-menu { display: inline-block; margin-right: 12px; }
+.position-menu summary { cursor: pointer; }
+.position-actions-row .close-position-button { background: #2863c2; color: white; border-color: #74b5ff; }
 .quote-updating .position-group-header > span:nth-child(n+4) strong,
 .quote-updating .position-profit-table tbody tr:not(.inline-edit-row):not(.position-actions-row) td:nth-child(n+5) { visibility: hidden; }
 .position-detail-section { margin-top:24px;padding-top:22px;border-top:1px solid rgba(128,161,213,.2) }

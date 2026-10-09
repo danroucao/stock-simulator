@@ -9,11 +9,12 @@ try {
   const left = await context.newPage();
   await left.goto('http://localhost:4200');
   await left.waitForFunction(() => document.querySelector('.summary-item.accent strong')?.textContent.includes('台積電'));
+  await left.locator('#workspace-settings > details > summary').evaluate(el => el.parentElement.open = true);
   await left.getByRole('button', { name: '立即儲存', exact: true }).click();
   const right = await context.newPage();
   await right.goto('http://localhost:4200');
   await right.waitForFunction(() => document.querySelector('.summary-item.accent strong')?.textContent.includes('台積電'));
-  await left.locator('#workspace-settings > details > summary').click();
+
   await left.getByLabel('可用現金', { exact: true }).fill('123456');
   await left.getByRole('button', { name: '立即儲存', exact: true }).click();
   await right.getByText('另一分頁已修改工作區，自動儲存已暫停', { exact: true }).waitFor();

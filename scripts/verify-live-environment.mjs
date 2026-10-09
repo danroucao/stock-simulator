@@ -40,7 +40,7 @@ try {
       await page.locator('#market-chart').screenshot({path:`tmp/live-acceptance/market-${width}-${symbol}.png`});
     }
     await page.getByRole('link',{name:'交易規劃',exact:true}).click();
-    await page.getByRole('button',{name:'規劃預設單',exact:true}).click();
+    await page.getByRole('button',{name:'建立部位',exact:true}).click();
     await page.locator('.board-form').screenshot({path:`tmp/live-acceptance/form-${width}.png`});
     await page.getByRole('link',{name:'持倉',exact:true}).click();
     await page.getByRole('button',{name:'全部持倉',exact:true}).click();

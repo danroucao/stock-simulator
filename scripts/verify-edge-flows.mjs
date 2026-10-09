@@ -30,6 +30,7 @@ try {
   assert.equal(await dialog.getByRole('button', { name:'確認記錄回補', exact:true }).isDisabled(), true);
   await dialog.getByLabel(/本次股數/).fill('200');
   await dialog.getByRole('button', { name:'確認記錄回補', exact:true }).click();
+  await page.getByRole('link', {name:'設定',exact:true}).click();
   await page.getByRole('button', { name:'立即儲存', exact:true }).click();
   const current = await page.evaluate(() => JSON.parse(localStorage.getItem('stock-simulator-workspace-v1')));
   assert.equal(current.tradePositions[0].shares, 200);
