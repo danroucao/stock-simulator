@@ -16,7 +16,8 @@
     "verify:density": "node scripts/verify-workspace-density.mjs",
     "verify:alerts": "node scripts/verify-alert-center.mjs",
     "verify:scan": "node scripts/verify-scan-pipeline.mjs",
-    "scan:market": "node scripts/scan-market.mjs"
+    "scan:market": "node scripts/scan-market.mjs",
+    "verify:official": "node --test scripts/official-market-data.test.mjs && node scripts/verify-official-scan.mjs"
   },
   "private": true,
   "packageManager": "npm@11.18.0",

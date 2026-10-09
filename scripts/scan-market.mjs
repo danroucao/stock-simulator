@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { ALERT_RULES, scanStock } from '../src/app/services/market-alerts.ts';
+import { loadOfficialMarket } from './official-market-data.mjs';
 
 const output = 'public/alerts/latest.json', statePath = 'scan-data/state.json';
 const read = async (path, fallback) => { try { return JSON.parse(await readFile(path, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } };
@@ -34,14 +35,22 @@ async function finmind(dataset, params = {}) {
   return response.data;
 }
 try {
-  if (!process.env.FINMIND_API_TOKEN) throw new Error('尚未設定 FINMIND_API_TOKEN；需要可存取整批日線與還原日線的 FinMind 權限');
+  const provider = process.env.MARKET_DATA_PROVIDER || 'official';
+  if (!['official','finmind'].includes(provider)) throw new Error('MARKET_DATA_PROVIDER 僅支援 official 或 finmind');
+  let universe, sessions, all, metadata;
+  const rules = provider === 'official' ? {...ALERT_RULES,version:'tw-daily-v2-official-safe'} : ALERT_RULES;
+  if (provider === 'official') {
+    const loaded = await loadOfficialMarket();
+    ({universe,sessions,all,metadata} = loaded); requestCount = loaded.requests;
+  } else {
+  if (!process.env.FINMIND_API_TOKEN) throw new Error('尚未設定 FINMIND_API_TOKEN；FinMind 模式需要整批還原行情權限');
   // Authoritative company registries: ETF, warrants and indices are not companies.
   console.log('取得上市普通股公司名冊');
   const listed = await json('https://openapi.twse.com.tw/v1/opendata/t187ap03_L');
   console.log('取得上櫃普通股公司名冊');
   const otc = await json('https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O');
   if (!Array.isArray(listed) || !Array.isArray(otc) || listed.length < 500 || otc.length < 300) throw new Error('上市／上櫃普通股公司名冊不完整');
-  const universe = new Map();
+  universe = new Map();
   for (const [rows, market] of [[listed,'twse'],[otc,'tpex']]) for (const item of rows) {
     const symbol = String(item['公司代號'] ?? item['SecuritiesCompanyCode'] ?? '').trim();
     const name = String(item['公司簡稱'] ?? item['CompanyAbbreviation'] ?? item['公司名稱'] ?? '').trim();
@@ -51,12 +60,10 @@ try {
   const taipeiDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(new Date());
   const taipeiHour = Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',hour:'2-digit',hourCycle:'h23'}).format(new Date()));
   console.log('取得 FinMind 交易日曆');
-  const sessions = [...new Set((await finmind('TaiwanStockTradingDate')).map(r=>r.date))].filter(d => d < taipeiDate || d === taipeiDate && taipeiHour >= 19).sort().slice(-100);
+  sessions = [...new Set((await finmind('TaiwanStockTradingDate')).map(r=>r.date))].filter(d => d < taipeiDate || d === taipeiDate && taipeiHour >= 19).sort().slice(-100);
   if (sessions.length < 100) throw new Error('交易日曆不足 100 日');
   const expectedMarketDate = sessions.at(-1);
-  const saved = await read(statePath,{version:ALERT_RULES.version,stocks:{}});
-  if (saved.version !== ALERT_RULES.version) throw new Error('規則版本已變更；請依文件備份並重建掃描狀態');
-  const all = new Map([...universe.keys()].map(s=>[s,[]]));
+  all = new Map([...universe.keys()].map(s=>[s,[]]));
   // Refetch the rolling window: historical adjustment factors can change on corporate actions.
   // Never cache adjusted prices across successful scan dates without refreshing their basis.
   for (const date of sessions) {
@@ -76,9 +83,15 @@ try {
     // A near-empty date is an upstream incident, not a mass delisting event.
     if (seen.size < universe.size * .8) throw new Error(`交易日 ${date} 行情覆蓋不足 80%，保留上次成功結果`);
   }
-  const stocks = [], newEvents = [], nextState = {version:ALERT_RULES.version,stocks:{}};
+  metadata = {dataSource:'FinMind 還原日線',priceBasis:'adjusted'};
+  }
+  const expectedMarketDate = sessions.at(-1);
+  const saved = await read(statePath,{version:rules.version,stocks:{}});
+  if (saved.version !== rules.version || previous.scannedAt && previous.rules.version !== rules.version) throw new Error('規則或價格基準已變更；請先備份並重建掃描狀態，不混用舊價格基準');
+  const stocks = [], newEvents = [], nextState = {version:rules.version,stocks:{}};
   for (const stock of universe.values()) {
-    const result = scanStock(stock,all.get(stock.symbol),sessions,saved.stocks[stock.symbol],ALERT_RULES);
+    const result = scanStock(stock,all.get(stock.symbol),sessions,saved.stocks[stock.symbol],rules);
+    if (provider==='official' && result.row) result.row.history=result.row.eligible ? result.row.history.slice(-70) : [];
     nextState.stocks[stock.symbol] = result.state;
     if (result.row) stocks.push(result.row);
     newEvents.push(...result.events);
@@ -86,7 +99,8 @@ try {
   const events = [...new Map([...previous.events,...newEvents].map(e=>[e.id,e])).values()].sort((a,b)=>b.date.localeCompare(a.date));
   for (const stock of stocks) stock.eventDate = events.find(e=>e.symbol===stock.symbol)?.date || stock.range?.date || stock.date;
   const result = {schemaVersion:1,status:'ready',marketDate:expectedMarketDate,expectedMarketDate,scannedAt:new Date().toISOString(),attemptedAt,
-    universeCount:universe.size,excludedCount:stocks.filter(s=>!s.eligible).length,rules:ALERT_RULES,stocks,events};
+    universeCount:universe.size,excludedCount:universe.size-stocks.filter(s=>s.eligible).length,rules,stocks,events,...metadata,
+    actionExcludedCount:stocks.filter(s=>s.exclusion?.includes('價格基準異動')).length};
   // Workflow publishes both files in one commit; a failed process cannot publish a partial pair.
   await atomic(statePath,nextState); await atomic(output,result);
   console.log(`掃描完成：${universe.size} 檔普通股、${newEvents.length} 個事件，行情 ${expectedMarketDate}，${requestCount} 次請求`);

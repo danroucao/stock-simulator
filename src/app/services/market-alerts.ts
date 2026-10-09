@@ -9,6 +9,8 @@ export type RangeStatus = '整理中' | '突破待確認' | '跌破區間' | '�
 export interface DailyBar {
   date: string; open: number; high: number; low: number; close: number;
   volume: number; turnover: number; rawClose: number;
+  action?: string;
+  dataIssue?: string;
 }
 export interface MarketStock { symbol: string; name: string; market: 'twse' | 'tpex'; }
 export interface RangeSnapshot {
@@ -34,6 +36,8 @@ export interface AlertFeed {
   marketDate: string | null; scannedAt: string | null; attemptedAt?: string;
   expectedMarketDate?: string; universeCount: number; excludedCount: number;
   rules: typeof ALERT_RULES; stocks: AlertStock[]; events: AlertEvent[];
+  dataSource?: string; priceBasis?: 'adjusted' | 'raw-action-screened'; safetyWindow?: number;
+  actionSources?: string[]; actionExcludedCount?: number; calendarYears?: number[]; closedDates?: string[];
 }
 const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 const near = 1e-10;
@@ -57,6 +61,10 @@ export function validHistory(bars: DailyBar[], sessions: string[], date: string)
   const recent = bars.filter(b => b.date <= date).slice(-70);
   if (expected.length < 70 || recent.length < 70) return '歷史不足 70 個交易日';
   if (recent.some((b, i) => b.date !== expected[i])) return '停牌或交易日資料缺漏';
+  const issue = recent.filter(b => !!b.dataIssue).at(-1);
+  if (issue) return `近 70 個交易日資料不完整（${issue.date} ${issue.dataIssue}）`;
+  const action = recent.filter(b => !!b.action).at(-1);
+  if (action) return `近 70 個交易日有價格基準異動（${action.date} ${action.action}），暫停提醒`;
   if (recent.some(b => ![b.open,b.high,b.low,b.close,b.rawClose,b.volume,b.turnover].every(Number.isFinite) ||
     b.low <= 0 || b.rawClose <= 0 || b.high < Math.max(b.open,b.close,b.low) || b.low > Math.min(b.open,b.close) || b.volume < 0 || b.turnover < 0)) return '行情數值異常';
   if (recent.slice(-45).some(b => b.volume === 0)) return '近 45 個交易日有無成交日';

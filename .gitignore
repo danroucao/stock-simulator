@@ -10,6 +10,7 @@
 /node_modules
 /.wrangler
 /worker/.wrangler
+/scan-data/official
 npm-debug.log
 yarn-error.log
 

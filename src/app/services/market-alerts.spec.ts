@@ -10,6 +10,24 @@ function fixture(count=100): DailyBar[] {
 }
 const stock = {symbol:'2330',name:'測試用股票',market:'twse' as const};
 describe('daily market alert rules',()=>{
+  it('excludes corporate actions for a complete 70-session window and never emits false breakouts',()=>{
+    const bars=fixture(180), sessions=bars.map(b=>b.date), initial=scanStock(stock,bars.slice(0,90),sessions.slice(0,90));
+    const snapshot=structuredClone(initial.state.range);
+    for(let i=90;i<bars.length;i++) bars[i]={...bars[i],open:25,high:26,low:23.5,close:25,rawClose:25};
+    bars[90].action='面額變更／分割';
+    const impacted=scanStock(stock,bars.slice(0,91),sessions.slice(0,91),initial.state);
+    expect(impacted.row!.eligible).toBe(false);expect(impacted.row!.exclusion).toContain('價格基準異動');expect(impacted.events).toEqual([]);expect(impacted.state.range).toEqual(snapshot);
+    const stillExcluded=scanStock(stock,bars.slice(0,160),sessions.slice(0,160),impacted.state);
+    expect(stillExcluded.row!.eligible).toBe(false);expect(stillExcluded.events).toEqual([]);
+    const recovered=scanStock(stock,bars.slice(0,161),sessions.slice(0,161),stillExcluded.state);
+    expect(recovered.row!.eligible).toBe(true);expect(recovered.events.every(e=>e.kind!=='跌破提醒')).toBe(true);
+    expect(recovered.events.some(e=>e.status==='區間失效')).toBe(true);
+  });
+  it('labels unannounced prices as incomplete data and does not create events',()=>{
+    const bars=fixture(), sessions=bars.map(b=>b.date);bars[80].dataIssue='有成交但未公告完整價格';
+    const result=scanStock(stock,bars,sessions);
+    expect(result.row!.exclusion).toContain('資料不完整');expect(result.events).toEqual([]);
+  });
   it('requires all three conditions and accepts inclusive boundaries',()=>{
     const bars=fixture(); const result=consolidation(bars)!;
     expect(result.matches).toBe(true); expect(result.trend).toBe(0); expect(result.smaChange).toBe(0);

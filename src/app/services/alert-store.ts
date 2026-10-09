@@ -14,6 +14,9 @@ export function validateAlertFeed(value: unknown): value is AlertFeed {
     Array.isArray(v.stocks) && Array.isArray(v.events) && !!v.rules && v.rules.window === 45 &&
     (v.marketDate === null || date(v.marketDate)) &&
     (v.scannedAt === null || Number.isFinite(Date.parse(v.scannedAt))) &&
+    (v.priceBasis===undefined || ['adjusted','raw-action-screened'].includes(v.priceBasis)) &&
+    (v.calendarYears===undefined || Array.isArray(v.calendarYears) && v.calendarYears.every(Number.isInteger)) &&
+    (v.closedDates===undefined || Array.isArray(v.closedDates) && v.closedDates.every(date)) &&
     Number.isInteger(v.universeCount) && v.universeCount>=0 && Number.isInteger(v.excludedCount) && v.excludedCount>=0 &&
     (v.status !== 'ready' || !!v.marketDate && !!v.scannedAt) &&
     v.stocks.every(s => /^\d{4}$/.test(s.symbol) && typeof s.name === 'string' && ['twse','tpex'].includes(s.market) &&
@@ -28,8 +31,18 @@ export function alertFreshness(feed: AlertFeed | null, now = new Date()): string
   const date = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(now);
   const hour = Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',hour:'2-digit',hourCycle:'h23'}).format(now));
   const yesterday = new Date(`${date}T00:00:00Z`); yesterday.setUTCDate(yesterday.getUTCDate()-1);
-  const expected = latestTradingDate(hour >= 20 ? date : yesterday.toISOString().slice(0,10));
-  if (!hasTradingCalendar(date)) return '本年度交易日曆尚未核對；請依資料截至日期判讀。';
+  const candidate = hour >= 20 ? date : yesterday.toISOString().slice(0,10);
+  const currentCalendar = feed.calendarYears?.includes(Number(date.slice(0,4))) && Array.isArray(feed.closedDates);
+  let expected = latestTradingDate(candidate);
+  if(currentCalendar) {
+    const cursor = new Date(`${candidate}T00:00:00Z`), closed = new Set(feed.closedDates);
+    for(let offset=0;offset<366;offset++) {
+      const value=cursor.toISOString().slice(0,10);
+      if(![0,6].includes(cursor.getUTCDay()) && !closed.has(value)) { expected=value;break; }
+      cursor.setUTCDate(cursor.getUTCDate()-1);
+    }
+  }
+  if (!currentCalendar && !hasTradingCalendar(date)) return '本年度交易日曆尚未核對；請依資料截至日期判讀。';
   return feed.marketDate < expected ? `行情落後預期交易日 ${expected}，請稍後重新讀取結果。` : '';
 }
 @Injectable({providedIn:'root'})

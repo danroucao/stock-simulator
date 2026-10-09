@@ -32,7 +32,7 @@ await import(${JSON.stringify(runner)});
 console.log('fixture calls='+calls);
 `);
 const run=mode=>{
-  try { return {ok:true,log:execFileSync(process.execPath,[bootstrap],{cwd:root,env:{...process.env,FINMIND_API_TOKEN:'offline-fixture-only',FIXTURE_MODE:mode},encoding:'utf8',stdio:'pipe'})}; }
+  try { return {ok:true,log:execFileSync(process.execPath,[bootstrap],{cwd:root,env:{...process.env,MARKET_DATA_PROVIDER:'finmind',FINMIND_API_TOKEN:'offline-fixture-only',FIXTURE_MODE:mode},encoding:'utf8',stdio:'pipe'})}; }
   catch(error) { return {ok:false,log:error.stdout+error.stderr}; }
 };
 const initial=run('ready'); assert.ok(initial.ok,initial.log);

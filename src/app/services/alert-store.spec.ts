@@ -27,4 +27,10 @@ describe('alert result delivery and follow storage',()=>{
     expect(alertFreshness(feed,new Date('2026-10-12T12:00:00Z'))).toContain('2026-10-12');
     expect(alertFreshness(feed,new Date('2027-01-04T12:00:00Z'))).toContain('尚未核對');
   });
+  it('uses the backend official calendar for exceptional closures and newly supported years',()=>{
+    const official={...feed,marketDate:'2027-07-08',calendarYears:[2027],closedDates:['2027-07-09']};
+    expect(alertFreshness(official,new Date('2027-07-09T12:00:00Z'))).toBe('');
+    expect(alertFreshness(official,new Date('2027-07-12T12:00:00Z'))).toContain('2027-07-12');
+    expect(validateAlertFeed({...official,closedDates:['not-a-date']})).toBe(false);
+  });
 });
