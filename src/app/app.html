@@ -158,12 +158,12 @@
 
   <section class="simulator-grid">
     @if (!showingAlerts() && alertSelection()?.stock?.symbol === stockSymbol()) {
-      <app-alert-detail id="alert-detail" style="grid-column:1/-1" [selection]="alertSelection()!" (simulate)="simulateAlert()" (back)="openAlerts()" />
+      <app-alert-detail id="alert-detail" style="grid-column:1/-1" [selection]="alertSelection()!" (historyReady)="acceptAlertHistory($event)" (simulate)="simulateAlert()" (back)="openAlerts()" />
     }
     <article id="market-chart" class="panel chart-panel" [class.collapsed]="collapsedPanels().has('chart')">
       <div class="panel-header">
         <h2>{{ stockSymbol() }} 行情與指標</h2>
-        <div class="chart-toolbar">
+        <div class="chart-toolbar">@if (alertSelection()?.stock?.symbol === stockSymbol()) { <button type="button" class="chart-range-button" [attr.aria-pressed]="showAlertRange()" (click)="showAlertRange.update(toggleBoolean)">顯示提醒區間</button> }
           <button type="button" class="chart-range-button" [disabled]="isLoadingQuote() || historyLoading()" (click)="loadCurrentPrice()">{{ isLoadingQuote() || historyLoading() ? '載入中…' : '重新整理行情' }}</button>
           @if (requestedDate() !== todayDate()) { <button type="button" class="chart-range-button" (click)="returnToToday()">回到今天</button> }
           <button type="button" class="chart-range-button" [disabled]="!canUpdateIntraday()" [class.active]="liveEnabled() && canUpdateIntraday()" (click)="toggleLive()" [attr.aria-pressed]="liveEnabled() && canUpdateIntraday()">{{ !canUpdateIntraday() ? '盤中更新暫停' : liveEnabled() ? '停止盤中更新' : '啟用盤中更新' }}</button>
@@ -249,7 +249,10 @@
               (mouseleave)="onBarLeave()"
             ></rect>
           }
-          <path [attr.d]="chartPath()" class="chart-line"></path>
+          @if (alertOverlay(); as overlay) {
+ @if (overlay.upper !== undefined) { <line x1="18" x2="742" [attr.y1]="overlay.upperY" [attr.y2]="overlay.upperY" stroke="#7fd1ff" stroke-dasharray="5 4"/><line x1="18" x2="742" [attr.y1]="overlay.lowerY" [attr.y2]="overlay.lowerY" stroke="#7fd1ff" stroke-dasharray="5 4"/><text x="24" [attr.y]="overlay.upperY-4" fill="#bce8ff" font-size="12">區間上緣 {{ overlay.upper | number:'1.0-2' }}</text><text x="24" [attr.y]="overlay.lowerY+14" fill="#bce8ff" font-size="12">區間下緣 {{ overlay.lower | number:'1.0-2' }}</text> }
+ @if (overlay.eventX !== undefined) { <line [attr.x1]="overlay.eventX" [attr.x2]="overlay.eventX" y1="18" y2="282" stroke="#ffcf80" stroke-dasharray="3 4"/><text x="24" y="16" fill="#ffcf80" font-size="12">事件 {{ alertSelection()?.event?.date || alertSelection()?.stock?.eventDate }}</text> }
+ }<path [attr.d]="chartPath()" class="chart-line"></path>
           @for (tick of chartDateTicks(); track tick.label) {
             <text [attr.x]="tick.x" y="305" class="chart-date-label" [attr.text-anchor]="tick.x < 100 ? 'start' : tick.x > 650 ? 'end' : 'middle'">{{ displayDate(tick.label) }}</text>
           }

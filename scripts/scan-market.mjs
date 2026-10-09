@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { ALERT_RULES, scanStock } from '../src/app/services/market-alerts.ts';
 import { loadOfficialMarket } from './official-market-data.mjs';
+import { writeAlertDelivery } from './alert-delivery.mjs';
 
 const output = 'public/alerts/latest.json', statePath = 'scan-data/state.json';
 const read = async (path, fallback) => { try { return JSON.parse(await readFile(path, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } };
@@ -87,6 +88,7 @@ try {
   }
   const expectedMarketDate = sessions.at(-1);
   const saved = await read(statePath,{version:rules.version,stocks:{}});
+  if(previous.scannedAt && !Object.keys(saved.stocks).length) throw new Error('成功掃描的持久化狀態遺失；保留上次結果，請先恢復 scan-data/state.json，避免重新初始化事件');
   if (saved.version !== rules.version || previous.scannedAt && previous.rules.version !== rules.version) throw new Error('規則或價格基準已變更；請先備份並重建掃描狀態，不混用舊價格基準');
   const stocks = [], newEvents = [], nextState = {version:rules.version,stocks:{}};
   for (const stock of universe.values()) {
@@ -99,13 +101,14 @@ try {
   const events = [...new Map([...previous.events,...newEvents].map(e=>[e.id,e])).values()].sort((a,b)=>b.date.localeCompare(a.date));
   for (const stock of stocks) stock.eventDate = events.find(e=>e.symbol===stock.symbol)?.date || stock.range?.date || stock.date;
   const result = {schemaVersion:1,status:'ready',marketDate:expectedMarketDate,expectedMarketDate,scannedAt:new Date().toISOString(),attemptedAt,
+    baselineDate:previous.baselineDate || (!previous.scannedAt ? expectedMarketDate : undefined),
     universeCount:universe.size,excludedCount:universe.size-stocks.filter(s=>s.eligible).length,rules,stocks,events,...metadata,
     actionExcludedCount:stocks.filter(s=>s.exclusion?.includes('價格基準異動')).length};
   // Workflow publishes both files in one commit; a failed process cannot publish a partial pair.
-  await atomic(statePath,nextState); await atomic(output,result);
+  await atomic(statePath,nextState); await writeAlertDelivery(output,result);
   console.log(`掃描完成：${universe.size} 檔普通股、${newEvents.length} 個事件，行情 ${expectedMarketDate}，${requestCount} 次請求`);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  await atomic(output,{...previous,status:previous.scannedAt ? 'error' : 'unconfigured',attemptedAt,message});
+  await writeAlertDelivery(output,{...previous,status:previous.scannedAt ? 'error' : 'unconfigured',attemptedAt,message});
   console.error(message); process.exitCode = 1;
 }

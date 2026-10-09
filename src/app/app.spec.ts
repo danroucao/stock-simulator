@@ -7,6 +7,25 @@ import { App } from './app';
 import { StockPriceService } from './stock-price.service';
 
 describe('App', () => {
+  it('ignores a delayed chart from a different reminder stock',()=>{
+    const app=TestBed.createComponent(App).componentInstance as any;
+    app.stockSymbol.set('2353');app.alertSelection.set({stock:{symbol:'2353',name:'宏碁'}});
+    app.history.set([]);app.acceptAlertHistory({symbol:'2330',bars:[{date:'2026-10-08',close:50}]});
+    expect(app.history()).toEqual([]);
+  });
+  it('keeps reminder identifiers in metadata while presenting readable trade notes',()=>{
+    const app=TestBed.createComponent(App).componentInstance as any;
+    vi.spyOn(app,'navigateWorkspace').mockImplementation(()=>{});
+    app.alertSelection.set({stock:{symbol:'2353',eventDate:'2026-10-08',status:'整理中',kinds:['整理觀察'],range:{id:'internal-range',version:'tw-daily-v2-official-safe',lower:29.65,upper:33.2}}});
+    app.simulateAlert();expect(app.positionForm().note).toContain('29.65～33.20');
+    expect(app.positionForm().note).not.toContain('internal-range');expect(app.positionForm().note).not.toContain('tw-daily');
+    expect(app.alertTradeSource().rangeId).toBe('internal-range');
+    app.positionForm.update((form:any)=>({...form,entryPrice:30,shares:1000,targetPrice:0,stopLossPrice:undefined}));
+    app.createPresetOrderFromForm();
+    expect(app.presetOrders().at(-1).reminderSource.rangeId).toBe('internal-range');
+    const raw=app.workspaceBackupJson();expect(JSON.parse(raw).presetOrders.at(-1).reminderSource.ruleVersion).toBe('tw-daily-v2-official-safe');
+  });
+
   it('reserves fees for pending entries and rejects invalid financial inputs', () => {
     const app = TestBed.createComponent(App).componentInstance as any;
     app.presetOrders.set([{ id: 'reserve-fee', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 100, validDays: 1, createdAt: app.todayDate(), expiryDate: app.todayDate() }]);

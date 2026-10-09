@@ -1,6 +1,8 @@
+export interface ReminderSource {symbol:string; eventId?:string; ruleVersion?:string; rangeId?:string; date:string;}
 export type OrderType = '現股多單' | '空單' | '融資' | '融券';
 
 export interface TradePosition {
+  reminderSource?:ReminderSource;
   entryFeePaid?: number;
   entryTaxPaid?: number;
   id: string;
@@ -48,6 +50,7 @@ export interface PresetFill {
 }
 
 export interface PresetOrder {
+  reminderSource?:ReminderSource;
   note?: string;
   id: string;
   symbol: string;

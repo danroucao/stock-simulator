@@ -19,11 +19,11 @@ try {
   for(const width of [1280,390]) {
     const context=await browser.newContext({viewport:{width,height:900},hasTouch:width===390});
     const page=await context.newPage(); let result=feed, fail=false;
-    await page.route('**/alerts/latest.json',route=>fail ? route.fulfill({status:503,body:'Unavailable'}) : route.fulfill({json:result}));
+    for(const name of ['index','latest']) await page.route('**/alerts/'+name+'.json',route=>fail ? route.fulfill({status:503,body:'Unavailable'}) : route.fulfill({json:result}));
     await page.route('**/api/tpex/**',route=>route.fulfill({json:{data:[{stock_id:'2330',stock_name:'測試台積電'},{stock_id:'6182',stock_name:'測試合晶'}],msgArray:[]}}));
     const raw=sessions.map(date=>[`${+date.slice(0,4)-1911}/${date.slice(5,7)}/${date.slice(8,10)}`,'1000000','50000000','50','52','47','50','0','0','0']);
     await page.route('https://www.twse.com.tw/**',route=>route.fulfill({json:{data:raw,title:'2330 測試台積電'}}));
-    await page.goto('http://localhost:4200');
+    await page.goto(process.env.ALERT_TEST_URL || 'http://localhost:4200');
     await page.getByRole('link',{name:'提醒中心',exact:true}).click();
     const center=page.locator('app-alert-center');
     const waitRows=async count=>page.waitForFunction(n=>document.querySelectorAll('app-alert-center tbody tr').length===n,count);
@@ -52,8 +52,11 @@ try {
     await detail.getByRole('button',{name:'建立模擬交易',exact:true}).click();
     assert.ok(await page.locator('#strategy-board').isVisible());
     const note=page.locator('#strategy-board').getByLabel('備註',{exact:true});
-    await page.waitForFunction(()=>[...document.querySelectorAll('#strategy-board input')].some(input=>input.value.includes('提醒中心：')));
-    assert.ok((await note.inputValue()).includes('提醒中心：'));
+    await page.waitForFunction(()=>[...document.querySelectorAll('#strategy-board input')].some(input=>input.value.includes('依據：')));
+    assert.ok((await note.inputValue()).includes('依據：'));
+    assert.ok(!(await note.inputValue()).includes('tw-daily'));
+    assert.equal(await detail.locator('svg').count(),0);
+    await page.locator('#market-chart svg.stock-chart').getByText(/區間上緣/).waitFor();
     await detail.getByRole('button',{name:'返回提醒中心',exact:true}).click();
     await center.locator('tbody tr').first().waitFor();
     await page.screenshot({path:`tmp/alert-center-${width}.png`,fullPage:false});

@@ -1,5 +1,5 @@
 // Execute the real keyless runner with synthetic HTTP responses in an isolated workspace.
-import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -41,10 +41,15 @@ const firstRun=run('ready');assert.ok(firstRun.ok,firstRun.log);
 const first=await load('public/alerts/latest.json'), state=await readFile(resolve(root,'scan-data/state.json'),'utf8');
 assert.equal(first.universeCount,1001);assert.equal(first.actionExcludedCount,2);assert.equal(first.events.length,999);assert.equal(first.priceBasis,'raw-action-screened');assert.equal(first.rules.version,'tw-daily-v2-official-safe');
 assert.equal(first.stocks.find(s=>s.symbol==='1001').eligible,false);assert.ok(!first.events.some(e=>e.symbol==='1000'||e.symbol==='1001'));
+assert.equal(first.baselineDate,first.marketDate);assert.ok(first.events.every(e=>e.origin==='initial'));
 const rerun=run('ready');assert.ok(rerun.ok,rerun.log);
 const second=await load('public/alerts/latest.json');assert.deepEqual(second.events,first.events);assert.equal(await readFile(resolve(root,'scan-data/state.json'),'utf8'),state);
 for(const mode of ['action-scope','quota']){
  const failure=run(mode);assert.equal(failure.ok,false);
  const preserved=await load('public/alerts/latest.json');assert.equal(preserved.status,'error');assert.deepEqual(preserved.events,second.events);assert.equal(preserved.scannedAt,second.scannedAt);assert.equal(await readFile(resolve(root,'scan-data/state.json'),'utf8'),state);
 }
+await unlink(resolve(root,'scan-data/state.json'));
+assert.equal(run('ready').ok,false);
+const lostState=await load('public/alerts/latest.json');assert.equal(lostState.status,'error');assert.deepEqual(lostState.events,second.events);
+assert.ok(lostState.message.includes('持久化狀態遺失'));
 console.log('Official runner: keyless full-market results, corporate-action/unknown-price exclusions, persistent snapshots, rerun dedup, cache reuse and failure preservation passed.');

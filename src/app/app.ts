@@ -112,6 +112,36 @@ interface StressScenario {
   styleUrl: './app.scss',
 })
 export class App {
+  protected readonly toggleBoolean=(value:boolean)=>!value;
+  protected readonly showAlertRange=signal(true);
+  protected acceptAlertHistory(result:{symbol:string;bars:import('./services/market-alerts').DailyBar[]}):void {
+    if(this.alertSelection()?.stock.symbol!==result.symbol || this.stockSymbol()!==result.symbol)return;
+    const points=result.bars.map(b=>({...b,name:this.alertSelection()!.stock.name,change:0}));
+    this.indicatorHistory.set(points);this.history.set(points.slice(-this.chartDays()));
+  }
+  private readonly reminderBounds=computed(()=>{
+    const selected=this.alertSelection(),range=selected?.event?.range || selected?.stock.range;
+    if(!selected || selected.stock.symbol!==this.stockSymbol() || !range || !this.showAlertRange())return null;
+    const anchor=this.indicatorHistory().find(p=>this.displayDate(p.date).replaceAll('/','-')===range.date);
+    return anchor ? {lower:range.lower*anchor.close/range.anchorClose,upper:range.upper*anchor.close/range.anchorClose} : null;
+  });
+  protected readonly chartExtent=computed(()=>{
+    const points=this.history(),bounds=this.reminderBounds();
+    return {min:Math.min(...points.map(p=>p.low),bounds?.lower ?? Infinity),max:Math.max(...points.map(p=>p.high),bounds?.upper ?? -Infinity)};
+  });
+  protected readonly alertOverlay=computed(()=>{
+    const selected=this.alertSelection(),points=this.history();
+    if(!selected || selected.stock.symbol!==this.stockSymbol() || !points.length || !this.showAlertRange())return null;
+    const range=selected.event?.range || selected.stock.range;
+    const anchor=this.indicatorHistory().find(p=>this.displayDate(p.date).replaceAll('/','-')===range?.date);
+    const factor=range && anchor ? anchor.close/range.anchorClose : undefined;
+    const {min,max}=this.chartExtent();
+    const y=(v:number)=>282-(v-min)/Math.max(max-min,1)*264;
+    const index=points.findIndex(p=>this.displayDate(p.date).replaceAll('/','-')===(selected.event?.date || selected.stock.eventDate));
+    return {upper:factor===undefined?undefined:range!.upper*factor,lower:factor===undefined?undefined:range!.lower*factor,
+      upperY:factor===undefined?0:y(range!.upper*factor),lowerY:factor===undefined?0:y(range!.lower*factor),
+      eventX:index<0?undefined:18+index*724/Math.max(points.length-1,1)};
+  });
   protected readonly showingAlerts = signal(false);
   protected readonly alertSelection = signal<AlertSelection | null>(null);
   protected openAlerts(event?: Event): void {
@@ -122,13 +152,18 @@ export class App {
     }, {injector:this.dialogInjector});
   }
   protected viewAlert(selection: AlertSelection): void {
+    ++this.quoteRequestId;++this.historyRequestId;++this.liveRequestId;
+    this.isLoadingQuote.set(false);this.historyLoading.set(false);this.liveLoading.set(false);
+    this.quoteError.set('');this.historyError.set('');this.indicatorHistory.set([]);this.tooltip.set(null);
+    this.quoteDate.set(selection.stock.date);this.quoteSource.set('');this.quoteFetchedAt.set('');this.quoteSession.set(null);
+    this.quoteChange.set(0);this.turnover.set(selection.stock.turnover);this.alertTradeSource.set(undefined);
     this.alertSelection.set(selection); this.showingAlerts.set(false);
     this.liveEnabled.set(false);
     this.stockSymbol.set(selection.stock.symbol); this.stockName.set(selection.stock.name);
     this.requestedDate.set(selection.stock.date); this.chartDays.set(60);
     this.editingPositionId.set(null); this.editingPresetOrderId.set(null);
     this.syncOrderFormToStock(selection.stock.symbol,0);
-    this.loadCurrentPrice();
+    this.history.set([]);this.latestPrice.set(selection.stock.close);this.showAlertRange.set(true);
     afterNextRender(() => {
       const target = document.getElementById('alert-detail');
       if (target) { target.tabIndex=-1; target.scrollIntoView({block:'start'}); target.focus({preventScroll:true}); }
@@ -138,11 +173,13 @@ export class App {
     const selection = this.alertSelection(); if (!selection) return;
     this.changeOrderMode('preset');
     this.orderDraftEdited = true;
+    const range=selection.event?.range || selection.stock.range;
+    this.alertTradeSource.set({symbol:selection.stock.symbol,eventId:selection.event?.id,ruleVersion:range?.version,rangeId:range?.id,date:selection.event?.date || selection.stock.eventDate});
     this.positionForm.update(form => ({...form,symbol:selection.stock.symbol,
-      note:`提醒中心：${selection.event?.status || selection.stock.status}；事件 ${selection.event?.date || selection.stock.eventDate}；${selection.event?.id || selection.stock.range?.id || ''}`}));
+      note:`依據：${selection.event?.date || selection.stock.eventDate} ${selection.event?.kind || selection.stock.kinds[0] || selection.stock.status}提醒${range ? ';區間 '+range.lower.toFixed(2)+'～'+range.upper.toFixed(2)+' 元。' : ';'+(selection.event?.reason || selection.stock.reason)}`}));
     this.navigateWorkspace(new Event('click'),'strategy-board');
   }
-
+  private readonly alertTradeSource=signal<import('./models/trade-position.model').ReminderSource | undefined>(undefined);
   private readonly workspaceStorageKey = 'stock-simulator-workspace-v1';
   protected readonly title = signal('Stock Trading Simulator');
   protected readonly stockSymbol = signal('2330');
@@ -602,7 +639,7 @@ export class App {
       this.tradePositions.update(items => [...items, { id, symbol: order.symbol, type: order.type, shares,
         entryFeePaid: short ? entryCosts.sellFee : entryCosts.buyFee, entryTaxPaid: short ? entryCosts.transactionTax : 0,
         entryPrice: price, targetPrice: order.exitPrice ?? price, stopLossPrice: order.stopLossPrice,
-        tradeDate: date, note: `${order.note ?? ''} 待成交委託成交：${order.id}`.trim() }]);
+        reminderSource:order.reminderSource, tradeDate: date, note: `${order.note ?? ''} 待成交委託成交`.trim() }]);
     }
     this.presetOrders.update(items => items.flatMap(item => item.id !== order.id ? [item] : item.shares > shares ? [{ ...item, shares: item.shares - shares }] : []));
     if (shares === order.shares) this.archivedPresetOrders.update(items => [...items, { ...order, shares: 0, finalStatus: '已成交', finalizedAt: new Date().toISOString() }]);
@@ -1118,9 +1155,7 @@ export class App {
     const width = 760;
     const height = 300;
     const padding = 18;
-    const prices = points.map((point) => point.close);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
+    const {min,max}=this.chartExtent();
     const span = Math.max(max - min, 1);
 
     return points
@@ -1144,8 +1179,7 @@ export class App {
   protected readonly chartPriceTicks = computed(() => {
     const points = this.history();
     if (!points.length) return [];
-    const min = Math.min(...points.map((point) => point.low));
-    const max = Math.max(...points.map((point) => point.high));
+    const {min,max}=this.chartExtent();
     const span = Math.max(max - min, 1);
     return Array.from({ length: 5 }, (_, index) => {
       const ratio = index / 4;
@@ -1153,16 +1187,11 @@ export class App {
     });
   });
 
-  protected readonly chartDateTicks = computed(() => {
-    const points = this.history();
-    if (!points.length) return [];
-    const indices = Array.from(new Set([0, Math.floor((points.length - 1) / 2), points.length - 1]));
-    return indices.map((index) => ({
-      label: points[index].date,
-      x: 18 + index * (724 / Math.max(points.length - 1, 1)),
-    }));
-  });
 
+  protected readonly chartDateTicks = computed(() => {
+    const points = this.history();if (!points.length) return [];
+    return Array.from(new Set([0,Math.floor((points.length-1)/2),points.length-1])).map(index=>({label:points[index].date,x:18+index*724/Math.max(points.length-1,1)}));
+  });
   protected readonly candleBars = computed<CandleBar[]>(() => {
     const points = this.history();
     if (points.length === 0) {
@@ -1173,8 +1202,7 @@ export class App {
     const height = 300;
     const padding = 18;
     const interval = (width - padding * 2) / Math.max(points.length, 1);
-    const min = Math.min(...points.map((point) => point.low));
-    const max = Math.max(...points.map((point) => point.high));
+    const {min,max}=this.chartExtent();
     const span = Math.max(max - min, 1);
     const chartHeight = height - padding * 2;
 
@@ -1621,6 +1649,7 @@ export class App {
   }
 
   protected editPresetOrder(order: PresetOrder): void {
+    this.alertTradeSource.set(order.reminderSource);
     this.pendingPresetCancel.set(null);
     this.orderStatus.set(`正在編輯 ${order.symbol} 待成交委託，儲存後更新原單。`);
     this.orderEntryMode.set('preset');
@@ -1954,6 +1983,7 @@ export class App {
       shareUnit: this.shareUnit(),
       stopLossPrice: form.stopLossPrice,
       note: form.note.trim(),
+      reminderSource:this.alertTradeSource()?.symbol===symbol ? this.alertTradeSource() : undefined,
     };
     this.presetOrders.update((orders) => editingId
       ? orders.map((order) => order.id === editingId ? { ...updatedOrder, id: editingId, createdAt: order.createdAt } : order)

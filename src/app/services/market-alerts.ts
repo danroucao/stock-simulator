@@ -17,6 +17,7 @@ export interface RangeSnapshot {
   id: string; date: string; lower: number; upper: number; anchorClose: number; version: string;
 }
 export interface AlertEvent {
+  origin?: 'initial' | 'transition';
   id: string; symbol: string; date: string; kind: AlertKind; status: string; reason: string;
   range?: RangeSnapshot; lower?: number; upper?: number; deviation?: number; volumeRatio?: number;
 }
@@ -32,12 +33,14 @@ export interface StockScanState {
   deviation?: 'low' | 'high' | 'normal'; retiredDate?: string;
 }
 export interface AlertFeed {
+  baselineDate?: string;
   schemaVersion: 1; status: 'ready' | 'error' | 'unconfigured'; message?: string;
   marketDate: string | null; scannedAt: string | null; attemptedAt?: string;
   expectedMarketDate?: string; universeCount: number; excludedCount: number;
   rules: typeof ALERT_RULES; stocks: AlertStock[]; events: AlertEvent[];
   dataSource?: string; priceBasis?: 'adjusted' | 'raw-action-screened'; safetyWindow?: number;
   actionSources?: string[]; actionExcludedCount?: number; calendarYears?: number[]; closedDates?: string[];
+  historyVersion?: string;
 }
 const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 const near = 1e-10;
@@ -95,7 +98,7 @@ export function scanStock(stock: MarketStock, bars: DailyBar[], sessions: string
     const kinds: AlertKind[] = []; let status = '未符合觀察條件', reason = '目前未符合整理或均線偏離觀察門檻。';
     let lower: number | undefined, upper: number | undefined;
     const push = (kind: AlertKind, eventStatus: string, text: string) => {
-      if (emit) { state.lastEventDate = date; events.push({ id:`${rules.version}:${stock.symbol}:${date}:${kind}:${eventStatus}:${state.range?.id ?? ''}`,
+      if (emit) { state.lastEventDate = date; events.push({ origin:previous.lastDate ? 'transition' : 'initial', id:`${rules.version}:${stock.symbol}:${date}:${kind}:${eventStatus}:${state.range?.id ?? ''}`,
         symbol:stock.symbol, date, kind, status:eventStatus, reason:text,
         range: state.range ? structuredClone(state.range) : undefined, lower, upper, deviation, volumeRatio }); }
     };

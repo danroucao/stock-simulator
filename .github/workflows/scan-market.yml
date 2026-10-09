@@ -6,6 +6,7 @@ on:
       - '.github/workflows/scan-market.yml'
       - 'scripts/scan-market.mjs'
       - 'scripts/official-market-data.mjs'
+      - 'scripts/alert-delivery.mjs'
       - 'src/app/services/market-alerts.ts'
   schedule:
     - cron: '20 11 * * 1-5' # 19:20 Asia/Taipei; actual dates come from the trading calendar
@@ -35,6 +36,7 @@ jobs:
           node-version: 24
       - name: Validate official source adapters and scanner invariants
         run: |
+          node --test scripts/alert-delivery.test.mjs
           node --test scripts/official-market-data.test.mjs
           node scripts/verify-official-scan.mjs
       - name: Restore official raw-price cache
@@ -66,7 +68,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add public/alerts/latest.json
+          git add public/alerts/latest.json public/alerts/index.json public/alerts/history.json
           if [ "$SCAN_OUTCOME" = success ]; then git add scan-data/state.json; fi
           if ! git diff --cached --quiet; then
             git commit -m 'Update daily market alerts'
