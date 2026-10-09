@@ -1,0 +1,26 @@
+name: Verify FinMind single-stock adjusted data access
+on:
+  push:
+    branches: ['codex/finmind-single-stock-probe']
+    paths:
+      - '.github/workflows/probe-finmind.yml'
+      - 'scripts/probe-finmind-access.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: finmind-access-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Verify raw and adjusted history for TWSE and TPEx stocks
+        env:
+          FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
+        run: node scripts/probe-finmind-access.mjs
