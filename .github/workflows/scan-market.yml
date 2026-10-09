@@ -1,0 +1,84 @@
+name: Scan Taiwan ordinary stocks after close
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/scan-market.yml'
+      - 'scripts/scan-market.mjs'
+      - 'src/app/services/market-alerts.ts'
+  schedule:
+    - cron: '20 11 * * 1-5' # 19:20 Asia/Taipei; actual dates come from the trading calendar
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Write scan results and deploy Pages (requires explicit production approval)'
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: market-scan
+  cancel-in-progress: false
+jobs:
+  scan:
+    # A newly merged workflow must not enable production publishing by itself.
+    if: github.event_name != 'schedule' || vars.MARKET_SCAN_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Scan (preserve last successful results on failure)
+        id: scan
+        continue-on-error: true
+        env:
+          FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
+        run: node scripts/scan-market.mjs
+      - name: Commit scan state and public result together
+        if: github.event_name == 'schedule' || inputs.publish == true
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/alerts/latest.json
+          if [ "$SCAN_OUTCOME" = success ]; then git add scan-data/state.json; fi
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update daily market alerts'
+            git push
+          fi
+      # GITHUB_TOKEN commits do not trigger push workflows; explicitly dispatch Pages build.
+      - name: Request existing Pages build
+        if: github.event_name == 'schedule' || inputs.publish == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref "${GITHUB_REF_NAME}"
+      - name: Report validation result without publishing
+        if: github.event_name != 'schedule' && inputs.publish != true
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const result = JSON.parse(readFileSync('public/alerts/latest.json', 'utf8'));
+          const lines = [
+            '## Market scan validation (no publication)',
+            `Run outcome: ${process.env.SCAN_OUTCOME}`,
+            `Result status: ${result.status}`,
+            `Market date: ${result.marketDate ?? 'unavailable'}`,
+            `Successful scan time: ${result.scannedAt ?? 'unavailable'}`,
+            `Ordinary-stock universe: ${result.universeCount}`,
+            `Excluded stocks: ${result.excludedCount}`,
+            `Events on latest market date: ${result.events.filter(e => e.date === result.marketDate).length}`,
+            result.message ? `Diagnostic: ${result.message}` : '',
+            'No result commit or Pages deployment was requested.',
+          ];
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+          NODE
+      - name: Report scan failure after preserving status
+        if: steps.scan.outcome == 'failure'
+        run: exit 1

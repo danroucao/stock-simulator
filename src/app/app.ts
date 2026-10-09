@@ -1,5 +1,8 @@
 ﻿import { DecimalPipe } from '@angular/common';
 import { calculateVolumeIndicators } from './services/volume-indicators';
+import { AlertCenter } from './components/alert-center/alert-center';
+import { AlertDetail } from './components/alert-center/alert-detail';
+import { AlertSelection } from './services/alert-store';
 import { PresetFill } from './models/trade-position.model';
 import { validateWorkspaceBackup } from './services/workspace-backup';
 import { planningReference } from './services/planning-reference';
@@ -104,11 +107,42 @@ interface StressScenario {
 
 @Component({
   selector: 'app-root',
-  imports: [DecimalPipe, PositionDetails],
+  imports: [DecimalPipe, PositionDetails, AlertCenter, AlertDetail],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
 export class App {
+  protected readonly showingAlerts = signal(false);
+  protected readonly alertSelection = signal<AlertSelection | null>(null);
+  protected openAlerts(event?: Event): void {
+    event?.preventDefault(); this.showingAlerts.set(true);
+    afterNextRender(() => {
+      const target = document.getElementById('alert-center');
+      if (target) { target.tabIndex=-1; target.scrollIntoView({block:'start'}); target.focus({preventScroll:true}); }
+    }, {injector:this.dialogInjector});
+  }
+  protected viewAlert(selection: AlertSelection): void {
+    this.alertSelection.set(selection); this.showingAlerts.set(false);
+    this.liveEnabled.set(false);
+    this.stockSymbol.set(selection.stock.symbol); this.stockName.set(selection.stock.name);
+    this.requestedDate.set(selection.stock.date); this.chartDays.set(60);
+    this.editingPositionId.set(null); this.editingPresetOrderId.set(null);
+    this.syncOrderFormToStock(selection.stock.symbol,0);
+    this.loadCurrentPrice();
+    afterNextRender(() => {
+      const target = document.getElementById('alert-detail');
+      if (target) { target.tabIndex=-1; target.scrollIntoView({block:'start'}); target.focus({preventScroll:true}); }
+    }, {injector:this.dialogInjector});
+  }
+  protected simulateAlert(): void {
+    const selection = this.alertSelection(); if (!selection) return;
+    this.changeOrderMode('preset');
+    this.orderDraftEdited = true;
+    this.positionForm.update(form => ({...form,symbol:selection.stock.symbol,
+      note:`提醒中心：${selection.event?.status || selection.stock.status}；事件 ${selection.event?.date || selection.stock.eventDate}；${selection.event?.id || selection.stock.range?.id || ''}`}));
+    this.navigateWorkspace(new Event('click'),'strategy-board');
+  }
+
   private readonly workspaceStorageKey = 'stock-simulator-workspace-v1';
   protected readonly title = signal('Stock Trading Simulator');
   protected readonly stockSymbol = signal('2330');

@@ -1,0 +1,78 @@
+// Synthetic fixtures are intercepted only in this browser test, never shipped as market data.
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { ALERT_RULES, scanStock } from '../src/app/services/market-alerts.ts';
+await mkdir('tmp',{recursive:true});
+const sessions=[], cursor=new Date('2026-10-08T00:00:00Z');
+while(sessions.length<100) { if(![0,6].includes(cursor.getUTCDay())) sessions.unshift(cursor.toISOString().slice(0,10)); cursor.setUTCDate(cursor.getUTCDate()-1); }
+const fixture=(symbol,name,market)=>{
+  const bars=sessions.map(date=>({date,open:50,high:52,low:47,close:50,rawClose:50,volume:1_000_000,turnover:50_000_000}));
+  const stock={symbol,name,market}, initial=scanStock(stock,bars.slice(0,99),sessions.slice(0,99));
+  bars[99]={...bars[99],open:52,high:55,close:54,rawClose:54,volume:2_000_000};
+  return scanStock(stock,bars,sessions,initial.state);
+};
+const a=fixture('2330','測試台積電','twse'), b=fixture('6182','測試合晶','tpex');
+const feed={schemaVersion:1,status:'ready',marketDate:sessions.at(-1),scannedAt:'2026-10-08T11:30:00Z',universeCount:2,excludedCount:0,rules:ALERT_RULES,stocks:[a.row,b.row],events:[...a.events,...b.events]};
+const browser=await chromium.launch({headless:true});
+try {
+  for(const width of [1280,390]) {
+    const context=await browser.newContext({viewport:{width,height:900},hasTouch:width===390});
+    const page=await context.newPage(); let result=feed, fail=false;
+    await page.route('**/alerts/latest.json',route=>fail ? route.fulfill({status:503,body:'Unavailable'}) : route.fulfill({json:result}));
+    await page.route('**/api/tpex/**',route=>route.fulfill({json:{data:[{stock_id:'2330',stock_name:'測試台積電'},{stock_id:'6182',stock_name:'測試合晶'}],msgArray:[]}}));
+    const raw=sessions.map(date=>[`${+date.slice(0,4)-1911}/${date.slice(5,7)}/${date.slice(8,10)}`,'1000000','50000000','50','52','47','50','0','0','0']);
+    await page.route('https://www.twse.com.tw/**',route=>route.fulfill({json:{data:raw,title:'2330 測試台積電'}}));
+    await page.goto('http://localhost:4200');
+    await page.getByRole('link',{name:'提醒中心',exact:true}).click();
+    const center=page.locator('app-alert-center');
+    const waitRows=async count=>page.waitForFunction(n=>document.querySelectorAll('app-alert-center tbody tr').length===n,count);
+    await center.locator('tbody tr').first().waitFor();
+    assert.equal(await center.locator('tbody tr').count(),2);
+    assert.equal(await center.locator('thead').isVisible(),width>700);
+    await center.getByRole('textbox',{name:'搜尋股票'}).fill('合晶');
+    assert.equal(await center.locator('tbody tr').count(),1);
+    await center.getByRole('textbox',{name:'搜尋股票'}).fill('');
+    await center.getByLabel('市場',{exact:false}).selectOption('tpex');
+    assert.equal(await center.locator('tbody tr').count(),1);
+    await center.getByLabel('市場',{exact:false}).selectOption('all');
+    await center.getByRole('button',{name:'加入追蹤 2330',exact:true}).click();
+    await center.getByRole('button',{name:/我的追蹤/}).click();
+    await waitRows(1);
+    assert.equal(await center.locator('tbody tr').count(),1);
+    await page.reload(); await page.getByRole('link',{name:'提醒中心',exact:true}).click();
+    await center.locator('tbody tr').first().waitFor();
+    assert.equal(await center.getByRole('button',{name:'取消追蹤 2330',exact:true}).count(),1);
+    await center.getByRole('button',{name:/我的追蹤/}).click();
+    await waitRows(1);
+    await center.getByRole('button',{name:'查看走勢',exact:true}).click();
+    const detail=page.locator('app-alert-detail'); await detail.waitFor();
+    assert.ok((await detail.textContent()).includes('觸發依據快照：'));
+    assert.ok((await detail.textContent()).includes('突破待確認'));
+    await detail.getByRole('button',{name:'建立模擬交易',exact:true}).click();
+    assert.ok(await page.locator('#strategy-board').isVisible());
+    const note=page.locator('#strategy-board').getByLabel('備註',{exact:true});
+    await page.waitForFunction(()=>[...document.querySelectorAll('#strategy-board input')].some(input=>input.value.includes('提醒中心：')));
+    assert.ok((await note.inputValue()).includes('提醒中心：'));
+    await detail.getByRole('button',{name:'返回提醒中心',exact:true}).click();
+    await center.locator('tbody tr').first().waitFor();
+    await page.screenshot({path:`tmp/alert-center-${width}.png`,fullPage:false});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile page must not overflow');
+    fail=true; await center.getByRole('button',{name:'重新讀取結果',exact:true}).click();
+    await center.getByRole('alert').filter({hasText:'讀取失敗'}).waitFor();
+    assert.equal(await center.locator('tbody tr').count(),2);
+    fail=false; result={...feed,status:'error',message:'測試掃描失敗，保留資料'};
+    await center.getByRole('button',{name:'重新讀取結果',exact:true}).click();
+    await center.getByText('最近掃描失敗，保留上次成功結果',{exact:true}).waitFor();
+    result={...feed,marketDate:'2026-01-02'};
+    await center.getByRole('button',{name:'重新讀取結果',exact:true}).click();
+    await center.getByText(/行情落後預期交易日/).waitFor();
+    result={...feed,events:[]}; await center.getByRole('button',{name:'重新讀取結果',exact:true}).click();
+    await center.getByText('最新交易日沒有符合篩選的新增事件',{exact:true}).waitFor();
+    await center.getByRole('button',{name:'目前符合',exact:true}).click();
+    await waitRows(2);
+    assert.equal(await center.locator('tbody tr').count(),2);
+    await context.close();
+    console.log(`${width}px：搜尋、市場篩選、追蹤重載、詳情快照、模擬來源、失敗保留、過期、無新增皆通過`);
+  }
+} finally { await browser.close(); }

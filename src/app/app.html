@@ -1,9 +1,11 @@
 ﻿<main class="dashboard">
   <nav class="planning-summary" aria-label="固定規劃摘要">
+    <a href="#alert-center" (click)="openAlerts($event)" [attr.aria-current]="showingAlerts() ? 'page' : null">提醒中心</a>
     <span>{{ stockSymbol() }} · 規劃資金 {{ availableCash() | number:'1.0-0' }}</span><span>淨曝險 {{ isLoadingQuote() ? '更新中…' : (portfolioExposure().net | number:'1.0-0') }}</span>
     <span>{{ oversubscribedSellOrders().length ? '出場委託超量' : estimatedPriceSymbols().length ? '部分行情缺漏' : hasSamplePositions() ? '含範例資料' : '交易規劃模式' }}</span>
     <a href="#market-chart" (click)="navigateWorkspace($event, 'market-chart')">行情</a><a href="#strategy-board" (click)="navigateWorkspace($event, 'strategy-board')">交易規劃</a><a href="#holdings-center" (click)="navigateWorkspace($event, 'holdings-center')">持倉</a><a href="#fill-history-title" (click)="navigateWorkspace($event, 'fill-history-title')">委託成交</a><a href="#risk-analysis" (click)="navigateWorkspace($event, 'risk-analysis')">風險分析</a><a href="#workspace-settings" (click)="navigateWorkspace($event, 'workspace-settings')">設定</a>
   </nav>
+  @if (showingAlerts()) { <app-alert-center id="alert-center" (openStock)="viewAlert($event)" /> }
   <section class="stock-record-panel" aria-labelledby="stock-record-title">
     <p class="save-status" role="status">{{ hasUnsavedChanges() ? (autoSaveEnabled() ? '有變更，將自動儲存…' : '有尚未儲存的變更') : (saveStatus() || '資料已儲存') }}</p>
     @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p> }
@@ -155,6 +157,9 @@
   </section>
 
   <section class="simulator-grid">
+    @if (!showingAlerts() && alertSelection()?.stock?.symbol === stockSymbol()) {
+      <app-alert-detail id="alert-detail" style="grid-column:1/-1" [selection]="alertSelection()!" (simulate)="simulateAlert()" (back)="openAlerts()" />
+    }
     <article id="market-chart" class="panel chart-panel" [class.collapsed]="collapsedPanels().has('chart')">
       <div class="panel-header">
         <h2>{{ stockSymbol() }} 行情與指標</h2>
