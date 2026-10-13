@@ -14,10 +14,14 @@
     "verify:ui": "node scripts/verify-ui.mjs",
     "verify:mobile": "node scripts/verify-trading-flow.mjs --mobile && node scripts/verify-edge-flows.mjs",
     "verify:density": "node scripts/verify-workspace-density.mjs",
+    "verify:charts": "node scripts/verify-charts.mjs",
+    "verify:market": "node scripts/verify-market-pages.mjs",
+    "verify:market-data": "node scripts/audit-full-market.mjs",
+    "verify:pages-build": "node scripts/verify-pages-build.mjs",
     "verify:alerts": "node scripts/verify-alert-center.mjs",
     "verify:scan": "node scripts/verify-scan-pipeline.mjs",
-    "scan:market": "node scripts/scan-market.mjs",
-    "verify:official": "node --test scripts/official-market-data.test.mjs && node scripts/verify-official-scan.mjs"
+    "verify:official": "node --test scripts/official-market-data.test.mjs && node scripts/verify-official-scan.mjs",
+    "scan:market": "node scripts/scan-market.mjs"
   },
   "private": true,
   "packageManager": "npm@11.18.0",

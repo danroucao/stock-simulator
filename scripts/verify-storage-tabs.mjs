@@ -3,17 +3,18 @@ import assert from 'node:assert/strict';
 const browser = await chromium.launch({ headless: true });
 try {
   const context = await browser.newContext();
+  const base=process.env.WORKSPACE_TEST_URL||'http://localhost:4200/';
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
   await context.route('**/api/tpex/**', route => route.fulfill({ json: { msgArray: [{ c: '2330', n: '台積電', d: today.replaceAll('-', ''), z: '100', y: '99', o: '99', h: '105', l: '95', v: '100' }] } }));
   await context.route('https://www.twse.com.tw/**', route => route.fulfill({ json: { title: '2330 台積電', data: [['115/09/01', '10000', '1000000', '99', '105', '95', '100', '1', '100', '0']] } }));
   const left = await context.newPage();
-  await left.goto('http://localhost:4200');
-  await left.waitForFunction(() => document.querySelector('.summary-item.accent strong')?.textContent.includes('台積電'));
+  await left.goto(base+'#/settings');
+  await left.waitForFunction(() => !!document.querySelector('#workspace-settings'));
   await left.locator('#workspace-settings > details > summary').evaluate(el => el.parentElement.open = true);
   await left.getByRole('button', { name: '立即儲存', exact: true }).click();
   const right = await context.newPage();
-  await right.goto('http://localhost:4200');
-  await right.waitForFunction(() => document.querySelector('.summary-item.accent strong')?.textContent.includes('台積電'));
+  await right.goto(base+'#/settings');
+  await right.waitForFunction(() => !!document.querySelector('#workspace-settings'));
 
   await left.getByLabel('可用現金', { exact: true }).fill('123456');
   await left.getByRole('button', { name: '立即儲存', exact: true }).click();

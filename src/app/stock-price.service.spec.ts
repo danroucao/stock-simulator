@@ -129,3 +129,20 @@ describe('history quota', () => {
     expect(attempts).toBe(1);
   });
 });
+
+describe('stock name lookup', () => {
+  it('does not keep a failed name response cached', async () => {
+    let requests=0;
+    const service=new StockPriceService({get:()=>{requests++;return of({data:requests===1?[]:[{stock_id:'6182',stock_name:'合晶'}]});}} as any);
+    expect(await firstValueFrom(service.getStockName('6182'))).toBe('');
+    expect(await firstValueFrom(service.getStockName('6182'))).toBe('合晶');
+    expect(requests).toBe(2);
+  });
+  it('shares one metadata request for multiple Chinese names', async () => {
+    let requests=0;
+    const service=new StockPriceService({get:()=>{requests++;return of({data:[{stock_id:'2330',stock_name:'台積電'},{stock_id:'6182',stock_name:'合晶'}]});}} as any);
+    expect(await firstValueFrom(service.getStockName('2330'))).toBe('台積電');
+    expect(await firstValueFrom(service.getStockName('6182'))).toBe('合晶');
+    expect(requests).toBe(1);
+  });
+});

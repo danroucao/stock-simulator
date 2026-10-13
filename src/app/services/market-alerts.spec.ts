@@ -16,12 +16,12 @@ describe('daily market alert rules',()=>{
     for(let i=90;i<bars.length;i++) bars[i]={...bars[i],open:25,high:26,low:23.5,close:25,rawClose:25};
     bars[90].action='面額變更／分割';
     const impacted=scanStock(stock,bars.slice(0,91),sessions.slice(0,91),initial.state);
-    expect(impacted.row!.eligible).toBe(false);expect(impacted.row!.exclusion).toContain('價格基準異動');expect(impacted.events).toEqual([]);expect(impacted.state.range).toEqual(snapshot);
+    expect(impacted.row!.eligible).toBe(false);expect(impacted.row!.exclusion).toContain('價格基準異動');expect(impacted.events).toEqual([]);expect(impacted.state.range).toBeUndefined();expect(initial.state.range).toEqual(snapshot);expect(impacted.state.suspended).toBe(true);
     const stillExcluded=scanStock(stock,bars.slice(0,160),sessions.slice(0,160),impacted.state);
     expect(stillExcluded.row!.eligible).toBe(false);expect(stillExcluded.events).toEqual([]);
     const recovered=scanStock(stock,bars.slice(0,161),sessions.slice(0,161),stillExcluded.state);
     expect(recovered.row!.eligible).toBe(true);expect(recovered.events.every(e=>e.kind!=='跌破提醒')).toBe(true);
-    expect(recovered.events.some(e=>e.status==='區間失效')).toBe(true);
+    expect(recovered.state.range!.date).toBe(sessions[160]);expect(recovered.events.every(e=>e.origin==='initial')).toBe(true);
   });
   it('labels unannounced prices as incomplete data and does not create events',()=>{
     const bars=fixture(), sessions=bars.map(b=>b.date);bars[80].dataIssue='有成交但未公告完整價格';

@@ -1,4 +1,5 @@
-import { Component, computed, inject, OnInit, output, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, output, signal,afterNextRender,Injector } from '@angular/core';
+import {AlertListSession} from '../../services/alert-list-session';
 import { DecimalPipe } from '@angular/common';
 import { AlertStore, AlertSelection, alertFreshness } from '../../services/alert-store';
 import { AlertKind, AlertStock } from '../../services/market-alerts';
@@ -6,6 +7,7 @@ import { exclusionSummary, upperDistance } from '../../services/alert-presentati
 
 @Component({selector:'app-alert-center',imports:[DecimalPipe],templateUrl:'./alert-center.html',styleUrl:'./alert-center.scss'})
 export class AlertCenter implements OnInit {
+  private readonly session=inject(AlertListSession);private readonly injector=inject(Injector);
   readonly Math = Math;
   readonly more=(value:number)=>value+20;
   readonly store = inject(AlertStore);
@@ -49,7 +51,8 @@ export class AlertCenter implements OnInit {
         (!query || `${s.symbol} ${s.name}`.toLowerCase().includes(query));
     }).sort((a,b)=>this.sort()==='upper' ? (upperDistance(a) ?? Infinity)-(upperDistance(b) ?? Infinity) || b.turnover-a.turnover : this.sort()==='turnover' ? b.turnover-a.turnover : b.eventDate.localeCompare(a.eventDate) || b.turnover-a.turnover);
   });
-  ngOnInit(): void { void this.refresh(); }
+  ngOnInit(): void {const value=this.session.value;if(value){this.tab.set(value.tab);this.category.set(value.category);this.search.set(value.search);this.market.set(value.market);this.minTurnover.set(value.minTurnover);this.sort.set(value.sort);this.deviationFilter.set(value.deviationFilter);this.limit.set(value.limit);afterNextRender(()=>window.scrollTo(0,value.scroll),{injector:this.injector});}void this.refresh();}
+  ngOnDestroy():void {this.session.value={tab:this.tab(),category:this.category(),search:this.search(),market:this.market(),minTurnover:this.minTurnover(),sort:this.sort(),deviationFilter:this.deviationFilter(),limit:this.limit(),scroll:window.scrollY};}
   async refresh(): Promise<void> { this.checkedAt.set(new Date()); await this.store.load(); }
   event(stock: AlertStock) {
     return this.tab()==='new' ? this.store.feed()?.events.find(e=>e.symbol===stock.symbol && e.date===this.store.feed()?.marketDate && (this.category()==='全部'||e.kind===this.category())) : undefined;

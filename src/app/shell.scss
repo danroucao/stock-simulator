@@ -1,0 +1,76 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  color: #e6edf9;
+  background: linear-gradient(150deg, #0d1d33, #071323);
+  font-family: system-ui, sans-serif;
+}
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #0b1b30ed;
+  border-bottom: 1px solid #36506e;
+  padding: 12px 24px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+.brand {
+  font-weight: 700;
+  color: #bce8ff;
+  text-decoration: none;
+}
+nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+nav a {
+  padding: 12px;
+  color: #bdd0e6;
+  text-decoration: none;
+  border-radius: 8px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+nav a.active {
+  background: #194767;
+  color: #fff;
+}
+.menu {
+  display: none;
+}
+.route-status {
+  font-size: 0.85rem;
+  color: #a9bdd5;
+  padding: 0 20px;
+}
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid #7fd1ff;
+}
+@media (max-width: 850px) {
+  .site-header {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+  .menu {
+    display: block;
+    color: #fff;
+    background: #112a46;
+    border: 1px solid #405a78;
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 44px;
+  }
+  nav {
+    display: none;
+    width: 100%;
+    grid-template-columns: repeat(2, 1fr);
+  }
+  nav.open {
+    display: grid;
+  }
+}

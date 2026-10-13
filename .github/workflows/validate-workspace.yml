@@ -1,0 +1,49 @@
+name: Validate market workspace (no publication)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workspace-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Unit and source adapter tests
+        run: |
+          npm test -- --watch=false
+          node --test scripts/official-market-data.test.mjs scripts/alert-delivery.test.mjs
+      - name: Offline scanner persistence checks
+        run: |
+          node scripts/verify-official-scan.mjs
+          node scripts/verify-scan-pipeline.mjs
+      - name: Audit committed market result
+        run: npm run verify:market-data
+      - name: Build for GitHub Pages
+        run: npm run build -- --base-href /stock-simulator/
+      - name: Install verification browser
+        run: npx playwright install --with-deps chromium
+      - name: Verify built pages and existing trading flows
+        run: npm run verify:pages-build
+      - name: Retain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-validation
+          path: |
+            tmp/full-market-audit.json
+            tmp/market-pages-*.png
+          if-no-files-found: ignore

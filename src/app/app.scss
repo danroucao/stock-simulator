@@ -261,9 +261,10 @@ input[type='checkbox'] { accent-color: #7fd1ff; width: 17px; height: 17px; }
 }
 
 .chart-tooltip {
-  position: absolute;
-  z-index: 2;
-  min-width: 160px;
+  position: fixed;
+  z-index: 40;
+  width: 220px;
+  box-sizing: border-box;
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(4, 10, 20, 0.92);
@@ -272,6 +273,10 @@ input[type='checkbox'] { accent-color: #7fd1ff; width: 17px; height: 17px; }
   font-size: 0.76rem;
   pointer-events: none;
 }
+.dated-chart { overflow-x: auto; }
+.dated-chart-inner { width: 100%; }
+.chart-dates { display: grid; padding: 4px 2.368%; color: #a7bbd7; font-size: 11px; text-align: center; }
+.chart-dates small { display: block; font-size: 9px; }
 
 .chart-section-label { display:flex;align-items:center;justify-content:space-between;padding:0 4px;color:#c9d9f2;font-size:.76rem;font-weight:700 }
 .chart-section-label em { color:#7087a9;font-size:.68rem;font-style:normal;font-weight:400 }

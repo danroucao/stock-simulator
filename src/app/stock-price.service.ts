@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { latestTradingDate } from './services/trading-calendar';
-import { Observable, catchError, forkJoin, map, of, switchMap, timeout, retry, timer, throwError } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap, timeout, retry, timer, throwError, shareReplay } from 'rxjs';
 
 interface TwseStockResponse {
   data?: [string, string, string, string, string, string, string, string, string, string][];
@@ -59,6 +59,19 @@ export class StockPriceService {
   private readonly requestUrl = 'https://www.twse.com.tw/exchangeReport/STOCK_DAY';
   private readonly tpexProxyUrl = this.getTpexProxyUrl();
   constructor(private readonly http: HttpClient) {}
+  private stockNamesRequest?: Observable<Record<string, string>>;
+  getStockName(symbol: string): Observable<string> {
+    this.stockNamesRequest ??= this.http.get<{data?: Array<{stock_id:string; stock_name:string}>}>(`${this.tpexProxyUrl}/api/stock-info`).pipe(
+      timeout(10000),
+      map(response => {
+        if (!Array.isArray(response.data) || !response.data.length) throw new Error('Stock names unavailable');
+        return Object.fromEntries(response.data.filter(row => /^\d{4,6}$/.test(row.stock_id) && typeof row.stock_name === 'string' && row.stock_name.trim() && row.stock_name !== row.stock_id).map(row => [row.stock_id, row.stock_name.trim()]));
+      }),
+      catchError(() => { this.stockNamesRequest = undefined; return of({} as Record<string,string>); }),
+      shareReplay({ bufferSize:1, refCount:false }),
+    );
+    return this.stockNamesRequest.pipe(map(names => names[symbol] ?? ''));
+  }
 
   getIntradayQuote(symbol: string): Observable<StockQuote | null> {
     const normalized = symbol.replace(/\D/g, '');
