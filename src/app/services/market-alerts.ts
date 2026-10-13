@@ -10,6 +10,7 @@ export interface DailyBar {
   date: string; open: number; high: number; low: number; close: number;
   volume: number; turnover: number; rawClose: number;
   action?: string;
+  change?:number|null;
   dataIssue?: string;
 }
 export interface MarketStock { symbol: string; name: string; market: 'twse' | 'tpex'; industry?:string;industryCode?:string|null;industryDate?:string; }

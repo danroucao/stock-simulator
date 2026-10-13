@@ -19,7 +19,7 @@ try {
   await route('overview');
   await page.getByRole('button',{name:'移除示意持倉',exact:true}).click();
   await page.getByRole('button',{name:'確認移除示意持倉',exact:true}).click();
-  await route('stock');
+  await route('stock'); await page.getByRole('tab',{name:'交易規劃',exact:true}).click();
   await page.getByRole('button',{name:'建立部位',exact:true}).click();
   const form=page.locator('.board-form');
   assert.equal(await page.locator('.board-visual').evaluate(el => el.open), false);
@@ -54,7 +54,7 @@ try {
   assert.equal(saved.cashMovements.length,1);
   assert.equal(saved.cashOpeningBalance,100000);
   assert.ok(Math.abs(saved.cashMovements[0].amount + 40034.2) < 0.0001);
-  await route('stock');
+  await route('stock'); await page.getByRole('tab',{name:'交易規劃',exact:true}).click();
   await page.getByRole('button',{name:'減少部位（賣出／回補）',exact:true}).click();
   await page.getByRole('button',{name:'規劃賣出委託',exact:true}).click();
   assert.equal(await form.getByLabel('股數',{exact:true}).inputValue(),'400');

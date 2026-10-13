@@ -1,0 +1,253 @@
+<section class="market-page">
+  <header>
+    <div>
+      <h1>市場動向</h1>
+      <p>觀察普通股交易集中在哪些官方產業。</p>
+    </div>
+    <button (click)="store.load()" [disabled]="store.loading()">
+      {{ store.loading() ? '讀取中…' : '重新讀取' }}
+    </button>
+  </header>
+  @if (store.freshness()) {
+    <p class="notice" role="status">{{ store.freshness() }}</p>
+  }
+  @if (store.error()) {
+    <p class="notice" role="alert">{{ store.error() }}</p>
+  }
+  @if (store.feed(); as feed) {
+    <p class="status-line">
+      行情 {{ feed.date }}｜掃描 {{ store.time(feed.scannedAt) }}（台北）｜上市有效
+      {{ feed.coverage.twse }}、上櫃有效 {{ feed.coverage.tpex }} 檔
+    </p>
+    @if (feed.status === 'error') {
+      <p class="notice" role="alert">最近掃描失敗，保留原資料：{{ feed.message }}</p>
+    }
+    @if (feed.dataDelay) {
+      <p class="notice">{{ feed.dataDelay }}</p>
+    }
+    <p>成交占比以有效當日普通股成交金額計算，ETF 不納入；不是資金淨流入或投資評分。</p>
+    @if (feed.coverage.twse + feed.coverage.tpex < feed.coverage.total) {
+      <p class="notice">
+        當日部分涵蓋：{{
+          feed.coverage.total - feed.coverage.twse - feed.coverage.tpex
+        }}
+        檔成交資料缺漏，不因技術指標不可用而排除有效金額。
+      </p>
+    }
+    <div class="summary-grid">
+      <div>
+        <span>{{ feed.date.slice(5).replace('-', '／') }} 交易最集中</span>
+        <h2>{{ concentrated()?.industry || '資料不足' }}</h2>
+        <p>{{ concentrated()?.share | number: '1.1-1' }}%</p>
+      </div>
+      <div>
+        <span>可比樣本熱度增加最多</span>
+        <h2>{{ increased()?.industry || '尚無增加資料' }}</h2>
+        @if (increased()) {
+          <p>+{{ increased()!.changePoints | number: '1.2-2' }} 百分點</p>
+        } @else {
+          <small>{{ comparable() ? '目前沒有正變化' : '歷史資料不可比較' }}</small>
+        }
+      </div>
+      <div>
+        <span>可比樣本熱度減少最多</span>
+        <h2>{{ decreased()?.industry || '尚無減少資料' }}</h2>
+        @if (decreased()) {
+          <p>{{ decreased()!.changePoints | number: '1.2-2' }} 百分點</p>
+        } @else {
+          <small>{{ comparable() ? '目前沒有負變化' : '歷史資料不可比較' }}</small>
+        }
+      </div>
+    </div>
+    @if (feed.heatComparison; as comparison) {
+      <p class="note">
+        固定可比樣本 {{ comparison.symbols.length }}／{{
+          feed.coverage.total
+        }}
+        檔，涵蓋當日有效成交金額
+        {{
+          comparison.currentTurnoverCoverage === null
+            ? '未知'
+            : (comparison.currentTurnoverCoverage | number: '1.1-1') + '%'
+        }}；樣本占比與下方全市場當日占比使用不同分母。
+      </p>
+      <details class="comparison-diagnostics">
+        <summary>查看缺漏日期與原因（{{ comparison.issues.length }} 項）</summary>
+        <p>
+          {{ comparison.scope }}。只保留當日與前 20
+          日分類、市場及成交金額均可核對的固定樣本；未納入股票不補值。
+        </p>
+        @for (issue of comparison.issues; track $index) {
+          <p>
+            {{ issue.date }}：{{ issue.reason }}
+            @if (issue.symbols) {
+              <small>股票：{{ issue.symbols!.join('、') }}</small>
+            }
+          </p>
+        } @empty {
+          <p>21 日分類快照皆可核對。</p>
+        }
+        <p>
+          排除
+          {{
+            comparison.excluded.length
+          }}
+          檔；樣本缺漏不直接當作熱度下降，新上市或分類異動不會使其餘固定樣本全部失效。
+        </p>
+        <details>
+          <summary>查看未納入樣本的股票與原因</summary>
+          <label
+            >搜尋缺漏股票或產業<input
+              aria-label="搜尋缺漏股票或產業"
+              [value]="diagnosticQuery()"
+              (input)="diagnosticQuery.set($any($event.target).value); diagnosticLimit.set(20)"
+          /></label>
+          @for (stock of visibleExcluded(); track stock.symbol) {
+            <p>
+              {{ stock.symbol }} {{ stock.name }} · {{ stock.industry }}：{{ stock.reason
+              }}<small>日期：{{ stock.dates.join('、') }}</small>
+            </p>
+          } @empty {
+            <p>沒有符合的缺漏股票。</p>
+          }
+          @if (visibleExcluded().length < excluded().length) {
+            <button (click)="diagnosticLimit.set(diagnosticLimit() + 20)">
+              載入更多缺漏股票（{{ excluded().length }} 檔）
+            </button>
+          }
+        </details>
+      </details>
+    } @else {
+      <p class="notice">這份舊結果尚未提供逐日缺漏診斷，等待新掃描產生，不推測歷史分類。</p>
+    }
+    <div class="filters">
+      <label
+        >搜尋產業<input
+          aria-label="搜尋產業"
+          [value]="query()"
+          (input)="query.set($any($event.target).value)"
+          placeholder="例如航運" /></label
+      ><label
+        >排序<select
+          aria-label="產業排序"
+          [value]="effectiveSort()"
+          (change)="sort.set($any($event.target).value)"
+        >
+          <option value="turnover">成交金額</option>
+          <option value="increase" [disabled]="!comparable()">熱度增加</option>
+          <option value="decrease" [disabled]="!comparable()">熱度減少</option>
+        </select></label
+      >
+    </div>
+    @if (!comparable()) {
+      <p class="note">尚無可比資料，熱度變化排序暫停使用。</p>
+    }
+    <h2>產業成交占比 · {{ expanded() ? '全部' : '前 10 大' }}</h2>
+    <div class="heat-bars" aria-label="產業成交占比橫條圖">
+      @for (industry of bars(); track industry.industry) {
+        <div class="heat-row">
+          <a routerLink="/screener" [queryParams]="{ industry: industry.industry }">{{
+            industry.industry
+          }}</a>
+          <div><div class="bar" [style.width.%]="industry.share"></div></div>
+          <span>{{ industry.share | number: '1.1-1' }}%</span>
+        </div>
+      }
+    </div>
+    @if (rows().length > 10) {
+      <button (click)="expanded.set(!expanded())">
+        {{ expanded() ? '收合為前 10 大' : '展開全部產業' }}
+      </button>
+    }
+    <div class="results">
+      <table>
+        <thead>
+          <tr>
+            <th>產業</th>
+            <th>當日成交金額／占比</th>
+            <th>可比樣本占比／前 20 日平均／變化</th>
+            <th>漲跌家數／涵蓋</th>
+            <th>交易集中度</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (i of rows(); track i.industry) {
+            <tr>
+              <td>
+                <a routerLink="/screener" [queryParams]="{ industry: i.industry }">{{
+                  i.industry
+                }}</a>
+              </td>
+              <td>
+                <span>{{ amount(i.turnover) }}</span
+                ><span>{{ i.share | number: '1.2-2' }}%</span>
+              </td>
+              <td>
+                @if (i.changePoints === null) {
+                  <span>不可比較</span><small>{{ i.comparisonReason }}</small>
+                } @else {
+                  <span>固定樣本 {{ i.comparisonStocks ?? i.total }}／{{ i.total }} 檔</span
+                  ><span
+                    >{{ i.comparisonShare ?? i.share | number: '1.2-2' }}%／平均
+                    {{ i.averageShare | number: '1.2-2' }}%</span
+                  ><strong
+                    >{{ i.changePoints > 0 ? '+' : ''
+                    }}{{ i.changePoints | number: '1.2-2' }} 百分點</strong
+                  ><small>{{
+                    i.changePoints > 0
+                      ? '可比樣本成交占比高於近期平均。'
+                      : i.changePoints < 0
+                        ? '可比樣本成交占比低於近期平均。'
+                        : '可比樣本成交占比與近期平均相近。'
+                  }}</small>
+                }
+              </td>
+              <td>
+                <span>上漲 {{ i.up }} · 下跌 {{ i.down }} · 平盤 {{ i.flat }}</span
+                ><small>比較價未知 {{ i.unknown }}；有效成交 {{ i.valid }}／{{ i.total }} 檔</small>
+              </td>
+              <td>
+                <details>
+                  <summary>
+                    前三大占
+                    {{
+                      i.concentration === null ? '未知' : (i.concentration | number: '1.1-1') + '%'
+                    }}
+                  </summary>
+                  @for (stock of i.top; track stock.symbol) {
+                    <a [routerLink]="['/stock', stock.symbol]" [queryParams]="{ from: 'market' }"
+                      >{{ stock.symbol }} {{ stock.name }} · {{ amount(stock.turnover) }}</a
+                    >
+                  }
+                </details>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="5">沒有符合的產業，請清除搜尋或重新讀取。</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <details>
+      <summary>計算與資料限制</summary>
+      <p>
+        分類截至
+        {{
+          feed.classificationDate
+        }}。當日占比＝產業成交金額／有效當日全市場成交金額。歷史比較使用明確列出的固定可比樣本，前
+        20
+        個交易日每日占比平均排除當日；當日樣本占比減去平均，以百分點呈現。不能將兩種分母的占比直接相減。熱度增減不代表股價漲跌或買賣建議。
+      </p>
+    </details>
+  } @else {
+    <p role="status">
+      {{ store.loading() ? '正在載入市場交易資訊…' : '市場資料尚未取得，請重新讀取。' }}
+    </p>
+  }
+  <details>
+    <summary>法人資訊</summary>
+    <p>尚未加入外資、投信、自營商買賣超；未來獨立呈現，不與成交熱度混算。</p>
+  </details>
+</section>

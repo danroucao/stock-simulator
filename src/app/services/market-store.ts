@@ -39,6 +39,7 @@ export function validMarket(value: unknown): value is MarketAnalysisFeed {
     !v.coverage
   )
     return false;
+  if(v.heatComparison && (!Array.isArray(v.heatComparison.dates)||!Array.isArray(v.heatComparison.symbols)||!Array.isArray(v.heatComparison.excluded)||!Array.isArray(v.heatComparison.issues)||typeof v.heatComparison.available!=='boolean'||v.heatComparison.issues.some(i=>!i||typeof i.date!=='string'||typeof i.reason!=='string'||i.symbols!==undefined&&!Array.isArray(i.symbols))))return false;
   if (
     new Set(v.stocks.map((s) => s.symbol)).size !== v.stocks.length ||
     v.coverage.checked !== v.stocks.length ||

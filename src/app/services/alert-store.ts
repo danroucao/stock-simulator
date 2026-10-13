@@ -101,13 +101,21 @@ export class AlertStore {
   }
   async loadHistory(stock: AlertFeed['stocks'][number]): Promise<import('./market-alerts').DailyBar[]> {
     if(this.feed()?.historyDelivery==='symbol'){
-      const url=new URL('alerts/history/'+stock.symbol+'.json',document.baseURI);url.searchParams.set('v',this.feed()?.historyVersion||'');
+      return this.loadSymbolHistory(stock.symbol,stock.date);
+    }
+    return this.loadLegacyHistory(stock);
+  }
+  async loadSymbolHistory(symbol:string,date:string):Promise<import('./market-alerts').DailyBar[]> {
+      if(!/^\d{4,6}$/.test(symbol))throw new Error('股票代號格式不符');
+      const version=this.feed()?.historyVersion;
+      const url=new URL('alerts/history/'+symbol+'.json',document.baseURI);url.searchParams.set('v',version||'');
       const response=await fetch(url,{cache:'no-cache',signal:AbortSignal.timeout(30000)});
       if(!response.ok)throw new Error('個股歷史讀取失敗，請重試');
       const data=await response.json();
-      if(data.schemaVersion!==1||data.symbol!==stock.symbol||data.version!==this.feed()?.historyVersion||!Array.isArray(data.bars)||data.bars.some((b:import('./market-alerts').DailyBar)=>b.date>stock.date || ![b.open,b.high,b.low,b.close,b.rawClose,b.volume,b.turnover].every(Number.isFinite)))throw new Error('個股歷史版本或格式不符');
+      if(data.schemaVersion!==1||data.symbol!==symbol||data.version!==version||!Array.isArray(data.bars)||data.bars.some((b:import('./market-alerts').DailyBar)=>b.date>date || ![b.open,b.high,b.low,b.close,b.rawClose,b.volume,b.turnover].every(Number.isFinite)))throw new Error('個股歷史版本或格式不符');
       return data.bars;
-    }
+  }
+  private async loadLegacyHistory(stock: AlertFeed['stocks'][number]):Promise<import('./market-alerts').DailyBar[]> {
     if(stock.history.length || !stock.eligible)return stock.history;
     const version=this.feed()?.historyVersion;if(!version)return [];
     if(this.histories?.version!==version) {

@@ -482,3 +482,6 @@ input[type='checkbox'] { accent-color: #7fd1ff; width: 17px; height: 17px; }
 }
 
 .record-select { display:flex;justify-content:space-between;gap:12px;width:100%;padding:12px 42px 12px 13px;background:none;border:0;color:inherit;text-align:left;cursor:pointer;border-radius:12px; }
+.stock-tabs { display:flex;flex-wrap:wrap;gap:8px;margin:16px 0; }
+.stock-tabs [aria-selected='true'] { border-color:#70d5ff;background:#173d56;color:#fff; }
+.simulator-grid.stock-focused { grid-template-columns:minmax(0,1fr); }

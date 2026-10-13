@@ -185,6 +185,8 @@ export async function loadOfficialMarket({ cacheRoot='scan-data/official', now=n
   const sessions=[...historicalDates].sort().slice(-historyCount);
   if(sessions.length<historyCount)throw new Error('官方歷史成交統計不足 100 個交易日');
   const target=sessions.at(-1), start=sessions[0];
+  const dataDelay=target<expectedMarketDate?`官方交易統計截至 ${target}，尚未涵蓋預期交易日 ${expectedMarketDate}；可能是來源延遲或臨時休市，保留實際行情日期。`:undefined;
+  if(dataDelay)log(dataDelay);
   log(`官方日線範圍 ${start}～${target}，${historyCount} 個交易日`);
   const actions=[];
   for(const source of ACTION_SOURCES) {
@@ -241,5 +243,5 @@ export async function loadOfficialMarket({ cacheRoot='scan-data/official', now=n
   }
   const closedDates=[...closed].sort();
   return {universe,all,sessions,requests,cacheHits,actions,metadata:{dataSource:'TWSE／TPEx 官方免費日線',priceBasis:'raw-action-screened',safetyWindow:70,
-    actionSources:ACTION_SOURCES.map(source=>source.path),calendarYears:[...calendars.keys()],closedDates,expectedMarketDate}};
+    actionSources:ACTION_SOURCES.map(source=>source.path),calendarYears:[...calendars.keys()],closedDates,expectedMarketDate,dataDelay}};
 }

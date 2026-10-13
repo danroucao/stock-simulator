@@ -6,14 +6,24 @@ import {
   afterNextRender,
   Injector,
   OnDestroy,
+  effect,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { MarketStore } from '../services/market-store';
 import { AlertStore } from '../services/alert-store';
-import { defaultFilter, sortedRows, percentile, ScreenFilter } from '../services/screening';
+import {
+  defaultFilter,
+  sortedRows,
+  percentile,
+  ScreenFilter,
+  filterFromQuery,
+  technicalPreset,
+} from '../services/screening';
+import { amount, boundLabel } from '../services/market-presentation';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MetricKey } from '../services/market-analysis';
-import {ALERT_RULES} from '../services/market-alerts';
+import { ALERT_RULES } from '../services/market-alerts';
 @Component({
   selector: 'app-screener',
   imports: [DecimalPipe, RouterLink],
@@ -21,7 +31,10 @@ import {ALERT_RULES} from '../services/market-alerts';
   styleUrl: './market-pages.scss',
 })
 export class Screener implements OnDestroy {
-  private readonly onHide=()=>{this.store.scroll=window.scrollY;this.store.rememberView();};
+  private readonly onHide = () => {
+    this.store.scroll = window.scrollY;
+    this.store.rememberView();
+  };
   readonly store = inject(MarketStore);
   readonly alerts = inject(AlertStore);
   private router = inject(Router);
@@ -31,6 +44,19 @@ export class Screener implements OnDestroy {
   readonly name = signal('');
   readonly tracking = signal(false);
   readonly status = signal('');
+  readonly amount = amount;
+  readonly metricFields: Array<{ key: MetricKey; label: string }> = [
+    { key: 'sma5', label: '近 5 日平均價' },
+    { key: 'sma60', label: '近 60 日平均價' },
+    { key: 'smaChange', label: '均線方向所需歷史' },
+    { key: 'width', label: '45 日區間' },
+    { key: 'trend', label: '45 日價格趨勢' },
+    { key: 'deviation', label: '均線偏離' },
+    { key: 'volatility', label: '20 日波動率' },
+    { key: 'averageTurnover', label: '平均成交金額' },
+    { key: 'zeroDays', label: '無成交日數' },
+    { key: 'distance', label: '保存區間上緣' },
+  ];
   readonly rows = computed(() => sortedRows(this.store.feed()?.stocks || [], this.filter()));
   readonly visible = computed(() => this.rows().slice(0, this.store.limit()));
   readonly industries = computed(() =>
@@ -52,22 +78,39 @@ export class Screener implements OnDestroy {
     if (f.consolidation !== 'all')
       labels.push(f.consolidation === 'yes' ? '符合盤整三條件' : '不符合盤整三條件');
     if (f.direction !== 'all') labels.push('價格方向：' + f.direction);
-    if (f.state !== 'all') labels.push('狀態：' + f.state);
+    if (f.state !== 'all') labels.push('狀態：' + f.state.replace('今日', '最新交易日'));
     for (const field of this.fields) {
       const b = f.bounds[field.key];
-      if (b) labels.push(field.label + ' ' + (b.min ?? '不限') + '～' + (b.max ?? '不限'));
+      if (b) labels.push(boundLabel(field.key, field.label, b));
     }
     return labels;
   });
   constructor() {
-    window.addEventListener('pagehide',this.onHide);
-    const industry = this.route.snapshot.queryParamMap.get('industry');
-    if (industry) this.update({ industry });
+    window.addEventListener('pagehide', this.onHide);
+    this.route.queryParams.pipe(takeUntilDestroyed()).subscribe((query) => {
+      if (this.router.getCurrentNavigation()?.extras.info === 'screen-sync') return;
+      const next = filterFromQuery(query, this.filter());
+      if (JSON.stringify(next) !== JSON.stringify(this.filter())) {
+        this.filter.set(next);
+        this.store.limit.set(20);
+      }
+    });
+    effect(() => {
+      const value = JSON.stringify(this.filter());
+      this.store.rememberView();
+      if (this.route.snapshot.queryParamMap.get('filter') !== value)
+        void this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { filter: value },
+          replaceUrl: true,
+          info: 'screen-sync',
+        });
+    });
     void this.store.load();
     afterNextRender(() => window.scrollTo(0, this.store.scroll), { injector: this.injector });
   }
   ngOnDestroy(): void {
-    window.removeEventListener('pagehide',this.onHide);
+    window.removeEventListener('pagehide', this.onHide);
     this.store.scroll = window.scrollY;
     this.store.rememberView();
   }
@@ -85,7 +128,7 @@ export class Screener implements OnDestroy {
     this.update({ bounds: f.bounds });
   }
   preset(kind: string): void {
-    const f = defaultFilter(),
+    const f = kind === '自訂' ? technicalPreset(this.filter()) : structuredClone(this.filter()),
       values = (this.store.feed()?.stocks || []).flatMap((s) =>
         s.metrics.volatility.value === null ? [] : [s.metrics.volatility.value],
       );
@@ -102,14 +145,25 @@ export class Screener implements OnDestroy {
         this.status.set('目前無有效波動率可設定預設。');
         return;
       }
-      f.bounds.volatility = kind === '高波動' ? { min: value } : { max: value };
+      const threshold = Number(value.toFixed(2));
+      f.bounds.volatility = kind === '高波動' ? { min: threshold } : { max: threshold };
     }
-    if (kind === '均線偏高') f.bounds.deviation = { min: Number(((ALERT_RULES.highRatio-1)*100).toFixed(8)) };
-    if (kind === '均線偏低') f.bounds.deviation = { max: Number(((ALERT_RULES.lowRatio-1)*100).toFixed(8)) };
+    if (kind === '均線偏高')
+      f.bounds.deviation = { min: Number(((ALERT_RULES.highRatio - 1) * 100).toFixed(8)) };
+    if (kind === '均線偏低')
+      f.bounds.deviation = { max: Number(((ALERT_RULES.lowRatio - 1) * 100).toFixed(8)) };
     this.update(f);
     this.status.set(
-      kind === '自訂' ? '已清除預設，請設定條件。' : '已套用「' + kind + '」，可在自訂條件中修改。',
+      kind === '自訂'
+        ? '已清除技術條件，保留搜尋、產業與市場。'
+        : '已套用「' +
+            kind.replace('今日', '最新交易日') +
+            '」，保留既有條件，可在自訂條件中修改。',
     );
+  }
+  resetAll(): void {
+    this.update(defaultFilter());
+    this.status.set('已重設全部條件。');
   }
   save(): void {
     if (!this.name().trim()) {

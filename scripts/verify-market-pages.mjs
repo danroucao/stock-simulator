@@ -21,7 +21,7 @@ try{for(const width of [1280,390]){
  // Wait for the observable state, not just the component host; a lost filter still times out.
  await page.waitForFunction(()=>document.querySelector('app-screener input')?.value==='2353');
  assert.equal(await screen.getByLabel('搜尋股票',{exact:true}).inputValue(),'2353');
- await screen.getByRole('button',{name:'自訂',exact:true}).click();await screen.getByRole('button',{name:'載入更多 20 檔'}).click();await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===40);
+ await screen.getByRole('button',{name:'重設全部',exact:true}).click();await screen.getByRole('button',{name:'載入更多 20 檔'}).click();await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===40);
  await screen.getByRole('button',{name:'均線偏低',exact:true}).click();await page.waitForTimeout(100);for(const row of await screen.locator('tbody tr').all())assert.ok((await row.textContent()).includes('均線偏離'));
  await screen.getByText('儲存條件與站內追蹤',{exact:true}).click();await screen.getByLabel('條件名稱',{exact:true}).fill('測試條件');await screen.getByLabel('啟用站內事件追蹤',{exact:true}).check();await screen.getByRole('button',{name:'儲存條件',exact:true}).click();await screen.getByRole('button',{name:'套用 測試條件',exact:true}).waitFor();
  await page.reload();await screen.getByText('儲存條件與站內追蹤',{exact:true}).click();await screen.getByRole('button',{name:'套用 測試條件',exact:true}).waitFor();

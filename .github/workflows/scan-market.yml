@@ -9,8 +9,9 @@ on:
       - 'scripts/alert-delivery.mjs'
       - 'src/app/services/market-alerts.ts'
       - 'src/app/services/market-analysis.ts'
+      - 'src/app/services/market-heat-comparison.ts'
   schedule:
-    - cron: '20 11 * * 1-5' # 19:20 Asia/Taipei; actual dates come from the trading calendar
+    - cron: '20 11,12,13 * * 1-5' # 19:20, 20:20, 21:20 Asia/Taipei; retry delayed sources/scheduling
   workflow_dispatch:
     inputs:
       publish:
