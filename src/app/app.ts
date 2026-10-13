@@ -22,6 +22,7 @@ import {Router,RouterLink,RouterOutlet,NavigationEnd,ActivatedRoute} from '@angu
 import {AlertStore} from './services/alert-store';
 import {MarketStore} from './services/market-store';
 import {WorkspaceSession} from './services/workspace-session';
+import {amount,chartChange} from './services/market-presentation';
 
 interface CandleBar {
   date: string;
@@ -44,6 +45,7 @@ interface VolumeBar {
 }
 
 interface ChartTooltip {
+  changeKnown?:boolean;
   x: number;
   y: number;
   date: string;
@@ -120,6 +122,18 @@ export class App {
   protected readonly alertChartBasis=signal(false);
   private readonly router=inject(ActivatedRoute,{optional:true}) ? inject(Router) : null;
   protected readonly page=signal('legacy');
+  protected readonly stockTab=signal<'chart'|'indicators'|'trade'>('chart');
+  protected readonly amount=amount;
+  protected readonly stockFollowing=computed(()=>this.alertStore.following(this.stockSymbol()));
+  protected toggleStockFollow():void {
+    const stock=this.routeAnalysis()||this.alertSelection()?.stock;
+    if(stock)this.alertStore.toggle(stock);
+  }
+  private routeSelectionKey='';
+  protected setStockTab(tab:'chart'|'indicators'|'trade'):void {
+    this.stockTab.set(tab);
+    if(this.router&&this.page()==='stock')void this.router.navigate([], {queryParams:{tab},queryParamsHandling:'merge',replaceUrl:true});
+  }
   protected readonly returnPath=signal('/screener');
   protected readonly marketStore=inject(MarketStore);
   protected readonly displayedPresetOrders=computed(()=>this.page()==='trades'?this.presetOrders():this.currentStockPresetOrders());
@@ -135,23 +149,50 @@ export class App {
     if(segments[0]==='stock'&&!/^\d{4,6}$/.test(segments[1]||'')){this.page.set('invalid');return;}
     if(segments[0]==='stock'&&/^\d{4,6}$/.test(segments[1]||'')){
       const symbol=segments[1];this.returnPath.set(['/market','/alerts','/screener'].includes('/'+tree.queryParams['from'])?'/'+tree.queryParams['from']:'/screener');
+      this.stockTab.set(['chart','indicators','trade'].includes(tree.queryParams['tab'])?tree.queryParams['tab']:'chart');
+      const key=[symbol,tree.queryParams['event']||'',tree.queryParams['condition']||''].join('|');
+      if(key===this.routeSelectionKey)return;
+      this.routeSelectionKey=key;
       this.conditionEvent.set(this.marketStore.events().find(e=>e.id===tree.queryParams['condition']&&e.symbol===symbol)||null);
+      this.alertSelection.set(null);this.alertTradeSource.set(undefined);this.alertChartBasis.set(false);
       if(this.stockSymbol()!==symbol){this.stockSymbol.set(symbol);this.stockName.set(symbol);this.alertSelection.set(null);this.loadCurrentPrice();}
       const attach=()=>{
         const now=this.router?.parseUrl(this.router.url).root.children['primary']?.segments;
-        if(now?.[0]?.path!=='stock'||now?.[1]?.path!==symbol)return;
+        if(now?.[0]?.path!=='stock'||now?.[1]?.path!==symbol||key!==this.routeSelectionKey)return;
         const stock=this.alertStore.feed()?.stocks.find(s=>s.symbol===symbol);
-        if(stock)this.viewAlert({stock,event:this.alertStore.feed()?.events.find(e=>e.id===tree.queryParams['event']&&e.symbol===symbol)});
+        const event=this.alertStore.feed()?.events.find(e=>e.id===tree.queryParams['event']&&e.symbol===symbol);
+        if(stock&&event)this.viewAlert({stock,event});
+        else if(stock&&this.conditionEvent()){this.viewAlert({stock});void this.loadAnalysisHistory(symbol,stock.date,stock.name,stock.close);}
+        else if(stock)void this.loadAnalysisHistory(symbol,stock.date,stock.name,stock.close);
+        else void this.marketStore.load().then(()=>{const analysis=this.routeAnalysis();if(analysis&&analysis.symbol===symbol&&key===this.routeSelectionKey)void this.loadAnalysisHistory(symbol,analysis.date,analysis.name,analysis.metrics.close.value??0);});
       };
-      if(this.alertStore.feed())attach();void this.alertStore.load().then(attach);
+      void this.alertStore.load().then(attach);
       if(!this.marketStore.feed())void this.marketStore.load();
-    }
+    }else this.routeSelectionKey='';
+  }
+  private async loadAnalysisHistory(symbol:string,date:string,name:string,close:number):Promise<void>{
+    ++this.quoteRequestId;++this.liveRequestId;const request=++this.historyRequestId;
+    const selection=this.routeSelectionKey;
+    this.stockName.set(name);this.requestedDate.set(date);this.quoteDate.set(date);this.latestPrice.set(close);
+    this.quoteSource.set('');this.quoteFetchedAt.set('');this.quoteChange.set(0);this.quoteSession.set(null);this.tooltip.set(null);
+    const current=this.routeAnalysis();this.turnover.set(current?.date===date?current.metrics.turnover.value??0:this.alertStore.feed()?.stocks.find(s=>s.symbol===symbol&&s.date===date)?.turnover??0);
+    this.quoteError.set('');this.isLoadingQuote.set(false);this.historyError.set('');this.historyLoading.set(true);
+    this.indicatorHistory.set([]);this.history.set([]);this.chartDays.set(60);this.liveEnabled.set(false);
+    if(!this.orderDraftEdited||this.positionForm().symbol!==symbol)this.syncOrderFormToStock(symbol,0);
+    try{
+      const source=this.alertStore.feed()?.stocks.find(s=>s.symbol===symbol);
+      const bars=source?await this.alertStore.loadHistory(source):await this.alertStore.loadSymbolHistory(symbol,date);
+      if(request!==this.historyRequestId||selection!==this.routeSelectionKey||symbol!==this.stockSymbol()||date!==this.requestedDate())return;
+      const points=bars.filter(b=>[b.open,b.high,b.low,b.close].every(v=>v>0)&&!b.dataIssue&&b.high>=Math.max(b.open,b.close,b.low)&&b.low<=Math.min(b.open,b.close)).map(b=>({...b,name,...chartChange(b,this.alertStore.feed()?.priceBasis)}));
+      this.indicatorHistory.set(points);this.history.set(points.slice(-this.chartDays()));this.alertChartBasis.set(true);
+    }catch(error){if(request===this.historyRequestId)this.historyError.set(error instanceof Error?error.message:'走勢讀取失敗，請重新讀取。');}
+    finally{if(request===this.historyRequestId)this.historyLoading.set(false);}
   }
   protected readonly toggleBoolean=(value:boolean)=>!value;
   protected readonly showAlertRange=signal(true);
   protected acceptAlertHistory(result:{symbol:string;bars:import('./services/market-alerts').DailyBar[]}):void {
     if(this.alertSelection()?.stock.symbol!==result.symbol || this.stockSymbol()!==result.symbol || this.requestedDate()!==this.alertSelection()?.stock.date)return;
-    const points=result.bars.filter(b=>[b.open,b.high,b.low,b.close].every(v=>v>0)&&!b.dataIssue&&b.high>=Math.max(b.open,b.close,b.low)&&b.low<=Math.min(b.open,b.close)).map(b=>({...b,name:this.alertSelection()!.stock.name,change:0}));
+    const points=result.bars.filter(b=>[b.open,b.high,b.low,b.close].every(v=>v>0)&&!b.dataIssue&&b.high>=Math.max(b.open,b.close,b.low)&&b.low<=Math.min(b.open,b.close)).map(b=>({...b,name:this.alertSelection()!.stock.name,...chartChange(b,this.alertStore.feed()?.priceBasis)}));
     this.indicatorHistory.set(points);this.history.set(points.slice(-this.chartDays()));this.alertChartBasis.set(true);
   }
   private readonly reminderBounds=computed(()=>{
@@ -261,6 +302,7 @@ export class App {
 
   protected navigateWorkspace(event: Event, targetId: string): void {
     event.preventDefault();
+    if(this.page()==='stock')this.setStockTab(targetId==='strategy-board'||targetId==='risk-analysis'?'trade':'chart');
     if(this.router){const next=targetId==='workspace-settings'?'/settings':['holdings-center','fill-history-title'].includes(targetId)?'/trades':'/stock/'+this.stockSymbol();if(!this.router.url.startsWith(next))void this.router.navigateByUrl(next);}
     const panels = new Set(this.collapsedPanels());
     panels.delete(targetId === 'market-chart' ? 'chart' : 'board');
@@ -2103,6 +2145,7 @@ export class App {
       close: point.close,
       volume: point.volume,
       change: point.change,
+      changeKnown:point.changeKnown,
     });
   }
 

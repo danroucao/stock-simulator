@@ -21,6 +21,29 @@ export const defaultFilter = (): ScreenFilter => ({
   sort: 'turnover',
   descending: true,
 });
+// URL owns the complete view when present. Old industry-only links remain compatible.
+export function filterFromQuery(query: Record<string, string>, fallback: ScreenFilter): ScreenFilter {
+  if (query['filter']) {
+    try {
+      const value = JSON.parse(query['filter']);
+      const base = defaultFilter();
+      if (!value || !Object.keys(base).every(key => key in value) ||
+        !['all','twse','tpex'].includes(value.market) || typeof value.industry !== 'string' ||
+        typeof value.query !== 'string' || !['all','yes','no'].includes(value.consolidation) ||
+        !['all','上升','下降','平穩','未知'].includes(value.direction) ||
+        !['all','整理中','突破待確認','跌破區間','回到原區間','今日突破','今日跌破'].includes(value.state) ||
+        typeof value.descending !== 'boolean' || !value.bounds || typeof value.bounds!=='object' || Array.isArray(value.bounds) ||
+        !['close','change','volume','turnover','width','trend','sma5','sma60','deviation','smaChange','volatility','averageTurnover','zeroDays','distance'].includes(value.sort) ||
+        Object.entries(value.bounds).some(([key,b])=>!['width','distance','volatility','deviation','averageTurnover'].includes(key) || !b || typeof b!=='object' || Object.entries(b).some(([side,n])=>!['min','max'].includes(side)||typeof n!=='number'||!Number.isFinite(n)))) return defaultFilter();
+      return value;
+    } catch { return defaultFilter(); }
+  }
+  return query['industry'] ? { ...defaultFilter(), industry: query['industry'] } : structuredClone(fallback);
+}
+
+export function technicalPreset(current: ScreenFilter): ScreenFilter {
+  return { ...defaultFilter(), query: current.query, market: current.market, industry: current.industry };
+}
 // Unknown is distinct from false. Known false wins over unknown in an AND predicate.
 export function matches(stock: AnalysisStock, filter: ScreenFilter): boolean | null {
   if (

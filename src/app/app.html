@@ -56,10 +56,14 @@
 </aside>
   @if(page()!=='legacy') { <h1>{{page()==='overview'?'總覽':page()==='trades'?'持倉與交易':page()==='settings'?'設定':page()==='invalid'?'無效股票連結':stockSymbol()+' '+stockName()+' 個股分析'}}</h1> }
   @if(page()==='invalid'){<p role="alert">股票代號格式不正確。請從選股中心重新選擇股票。</p><a routerLink="/screener">前往選股中心</a>}
-  @if(page()==='stock') { <a class="ghost-button" [routerLink]="returnPath()">返回{{returnPath()==='/market'?'市場動向':returnPath()==='/alerts'?'提醒中心':'選股中心'}}</a> }
-  @if(page()==='stock' && conditionEvent();as event){<section class="stock-record-panel"><h2>已保存條件依據：{{event.name}} · {{event.state}}</h2><p>可用快照 {{event.previousDate||'首次啟用'}} → {{event.date}}；不推測期間首次觸發日。</p><p>觸發時均線偏離 {{event.snapshot.metrics.deviation.value===null?'未知':(event.snapshot.metrics.deviation.value|number:'1.1-1')+'%'}} · 區間寬度 {{event.snapshot.metrics.width.value===null?'未知':(event.snapshot.metrics.width.value|number:'1.1-1')+'%'}}</p></section>}
-  @if(page()==='stock' && routeAnalysis();as analysis){<section class="stock-record-panel"><h2>全市場分析摘要 · {{analysis.industry}}</h2><p>行情 {{analysis.date}} · 45 日盤整 {{analysis.consolidating===null?'無法判定':analysis.consolidating?'符合三條件':'不符合三條件'}} · {{analysis.direction}} · {{analysis.smaDirection}}</p>@if(analysis.range){<p>價格觀察區間 {{analysis.range.lower|number:'1.0-2'}}～{{analysis.range.upper|number:'1.0-2'}} 元，辨識於 {{analysis.range.date}}。此區間獨立於原提醒的流動性門檻。</p>}<p>寬度 {{analysis.metrics.width.value===null?'未知':(analysis.metrics.width.value|number:'1.1-1')+'%'}} · 20 日波動 {{analysis.metrics.volatility.value===null?'未知':(analysis.metrics.volatility.value|number:'1.2-2')+'%'}} · 45 日平均成交 {{analysis.metrics.averageTurnover.value===null?'未知':(analysis.metrics.averageTurnover.value|number:'1.0-0')+' 元'}}</p><details><summary>指標可用性與原因</summary><p>SMA5：{{analysis.metrics.sma5.value===null?analysis.metrics.sma5.reason:(analysis.metrics.sma5.value|number:'1.2-2')}}</p><p>SMA60：{{analysis.metrics.sma60.value===null?analysis.metrics.sma60.reason:(analysis.metrics.sma60.value|number:'1.2-2')}}</p><p>偏離率：{{analysis.metrics.deviation.value===null?analysis.metrics.deviation.reason:(analysis.metrics.deviation.value|number:'1.1-1')+'%'}}</p><p>45 日盤整：{{analysis.metrics.width.reason||analysis.metrics.smaChange.reason||'三項價格條件可計算；提醒策略另有流動性門檻。'}}</p><p>波動：{{analysis.metrics.volatility.reason||'樣本標準差，20 個簡單日報酬，未年化。'}}</p><p>原始走勢若有價格基準異動，不提供跨異動的區間線；重新取得既有原始行情時停用提醒區間，避免混用價格基準。</p></details></section>}
-  @if(page()==='legacy'||page()==='stock'||page()==='trades'){  <section class="stock-record-panel" aria-labelledby="stock-record-title">
+  @if(page()==='stock') { <div class="actions"><a class="ghost-button" [routerLink]="returnPath()">返回{{returnPath()==='/market'?'市場動向':returnPath()==='/alerts'?'提醒中心':'選股中心'}}</a><button type="button" [disabled]="!routeAnalysis()&&!alertSelection()" [attr.aria-pressed]="stockFollowing()" (click)="toggleStockFollow()">{{stockFollowing()?'★ 已追蹤':'☆ 加入追蹤'}}</button></div> }
+  @if(page()==='stock'){<nav class="stock-tabs" role="tablist" aria-label="個股功能">
+ <button type="button" role="tab" [attr.aria-selected]="stockTab()==='chart'" aria-controls="market-chart" (click)="setStockTab('chart')">走勢</button>
+ <button type="button" role="tab" [attr.aria-selected]="stockTab()==='indicators'" aria-controls="stock-indicators" (click)="setStockTab('indicators')">指標</button>
+ <button type="button" role="tab" [attr.aria-selected]="stockTab()==='trade'" aria-controls="strategy-board" (click)="setStockTab('trade')">交易規劃</button></nav>}
+  @if(page()==='stock' && stockTab()==='chart' && conditionEvent();as event){<section class="stock-record-panel"><h2>已保存條件依據：{{event.name}} · {{event.state}}</h2><p>可用快照 {{event.previousDate||'首次啟用'}} → {{event.date}}；不推測期間首次觸發日。</p><p>觸發時均線偏離 {{event.snapshot.metrics.deviation.value===null?'未知':(event.snapshot.metrics.deviation.value|number:'1.1-1')+'%'}} · 區間寬度 {{event.snapshot.metrics.width.value===null?'未知':(event.snapshot.metrics.width.value|number:'1.1-1')+'%'}}</p></section>}
+  @if(page()==='stock' && stockTab()==='indicators' && routeAnalysis();as analysis){<section id="stock-indicators" role="tabpanel" class="stock-record-panel"><h2>全市場分析摘要 · {{analysis.industry}}</h2><p>行情 {{analysis.date}} · 45 日盤整 {{analysis.consolidating===null?'無法判定':analysis.consolidating?'符合三條件':'不符合三條件'}} · {{analysis.direction}} · {{analysis.smaDirection}}</p>@if(analysis.range){<p>價格觀察區間 {{analysis.range.lower|number:'1.0-2'}}～{{analysis.range.upper|number:'1.0-2'}} 元，辨識於 {{analysis.range.date}}。此區間獨立於原提醒的流動性門檻。</p>}<p>寬度 {{analysis.metrics.width.value===null?'未知':(analysis.metrics.width.value|number:'1.1-1')+'%'}} · 20 日波動 {{analysis.metrics.volatility.value===null?'未知':(analysis.metrics.volatility.value|number:'1.2-2')+'%'}} · 45 日平均成交 {{analysis.metrics.averageTurnover.value===null?'未知':amount(analysis.metrics.averageTurnover.value)}}</p><details><summary>指標可用性與原因</summary><p>SMA5：{{analysis.metrics.sma5.value===null?analysis.metrics.sma5.reason:(analysis.metrics.sma5.value|number:'1.2-2')}}</p><p>SMA60：{{analysis.metrics.sma60.value===null?analysis.metrics.sma60.reason:(analysis.metrics.sma60.value|number:'1.2-2')}}</p><p>偏離率：{{analysis.metrics.deviation.value===null?analysis.metrics.deviation.reason:(analysis.metrics.deviation.value|number:'1.1-1')+'%'}}</p><p>45 日盤整：{{analysis.metrics.width.reason||analysis.metrics.smaChange.reason||'三項價格條件可計算；提醒策略另有流動性門檻。'}}</p><p>波動：{{analysis.metrics.volatility.reason||'樣本標準差，20 個簡單日報酬，未年化。'}}</p><p>原始走勢若有價格基準異動，不提供跨異動的區間線；重新取得既有原始行情時停用提醒區間，避免混用價格基準。</p></details></section>}
+  @if(page()==='legacy'||(page()==='stock'&&stockTab()==='trade')||page()==='trades'){  <section class="stock-record-panel" aria-labelledby="stock-record-title">
     <div class="stock-record-heading">
       <div><span class="eyebrow">多檔股票</span><h2 id="stock-record-title">股票記錄</h2></div>
       <div class="stock-record-add"><input type="text" inputmode="numeric" maxlength="6" aria-label="股票代號" placeholder="輸入股票代號，例如 2317" [value]="recordSymbolInput()" (input)="recordSymbolInput.set($any($event.target).value)" (keydown.enter)="addStockRecord()" /><button type="button" [disabled]="!!recordQuoteLoading()" (click)="addStockRecord()">{{ recordQuoteLoading() ? '查詢中…' : '＋ 新增／切換股票' }}</button></div>
@@ -94,15 +98,15 @@
   </section>
 
 }
-  @if(page()==='legacy'||page()==='stock'){  <section class="hero-card">
-    <div class="hero-copy">
+  @if(page()==='legacy'||(page()==='stock'&&stockTab()==='chart')){  <section class="hero-card">
+    @if(page()==='legacy'){<div class="hero-copy">
       <span class="eyebrow">股票下單模擬器</span>
       <h1>{{ title() }}</h1>
       <p>
         先選擇股票並查看行情，再建立持倉或近期待成交委託，試算獲利與風險。
       </p>
     </div>
-    <div class="summary-grid">
+    }<div class="summary-grid">
       <div class="summary-item accent">
         <span>目標股票</span>
         <strong>{{ stockLabel(stockSymbol(), stockName()) }}</strong>
@@ -203,11 +207,11 @@
   </section>
 
 @if(page()!=='legacy'){<div class="actions"><a routerLink="/screener">發現股票</a><a routerLink="/market">查看產業交易</a><a routerLink="/trades">管理持倉與委託</a></div>}}
-  @if(page()==='legacy'||page()==='stock'||page()==='trades') { <section class="simulator-grid">
-    @if ((page()==='legacy'||page()==='stock') && !showingAlerts() && alertSelection()?.stock?.symbol === stockSymbol()) {
+  @if(page()==='legacy'||page()==='stock'||page()==='trades') { <section class="simulator-grid" [class.stock-focused]="page()==='stock'">
+    @if ((page()==='legacy'||page()==='stock') && stockTab()==='chart' && !showingAlerts() && !!alertSelection()?.event && alertSelection()?.stock?.symbol === stockSymbol()) {
       <app-alert-detail id="alert-detail" style="grid-column:1/-1" [selection]="alertSelection()!" (historyReady)="acceptAlertHistory($event)" (simulate)="simulateAlert()" (back)="openAlerts()" />
     }
-    @if(page()==='legacy'||page()==='stock'){    <article id="market-chart" class="panel chart-panel" [class.collapsed]="collapsedPanels().has('chart')">
+    @if(page()==='legacy'||(page()==='stock'&&stockTab()==='chart')){    <article id="market-chart" class="panel chart-panel" [class.collapsed]="collapsedPanels().has('chart')">
       <div class="panel-header">
         <h2>{{ stockSymbol() }} 行情與指標</h2>
         <div class="chart-toolbar">@if (alertSelection()?.stock?.symbol === stockSymbol()) { <button type="button" class="chart-range-button" [disabled]="!alertChartBasis()" [attr.aria-pressed]="showAlertRange()" (click)="showAlertRange.update(toggleBoolean)">顯示提醒區間</button> }
@@ -246,7 +250,7 @@
             <div>高：{{ tooltip()?.high | number: '1.0-2' }}</div>
             <div>低：{{ tooltip()?.low | number: '1.0-2' }}</div>
             <div>收：{{ tooltip()?.close | number: '1.0-2' }}</div>
-            <div>漲跌：{{ tooltip()?.change | number: '1.0-2' }}</div>
+            <div>漲跌：{{ tooltip()?.changeKnown===false?'未取得同基準漲跌':(tooltip()?.change | number: '1.0-2') }}</div>
             <div>成交量：{{ tooltip()?.volume | number: '1.0-0' }}</div>
             @if (hoveredIndicators(); as indicators) {
               <div>OBV：{{ indicators.obv | number:'1.0-0' }}</div>
@@ -401,9 +405,9 @@
 
 }
     @if(page()==='trades'){<section class="panel" style="grid-column:1/-1"><ng-container [ngTemplateOutlet]="holdingsPane"/></section>}
-    <article id="strategy-board" class="panel board-panel" [class.collapsed]="collapsedPanels().has('board')">
+    @if(page()==='legacy'||page()==='trades'||stockTab()==='trade'){<article id="strategy-board" class="panel board-panel" [class.collapsed]="collapsedPanels().has('board')">
       <div class="panel-header">
-        <div><h2>{{ stockLabel(stockSymbol(), stockName()) }} 交易規劃</h2></div>
+        <div><h2>{{ stockLabel(stockSymbol(), stockName()) }} 交易規劃</h2>@if(page()==='stock'&&stockTab()==='trade'){<button type="button" [disabled]="isLoadingQuote()" (click)="loadCurrentPrice()">{{isLoadingQuote()?'載入中…':'重新整理行情'}}</button>}</div>
         <div class="panel-header-actions"><span class="badge">{{ stockSymbol() }} · {{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆待成交委託</span><button type="button" class="collapse-button" (click)="togglePanel('board')" [attr.aria-expanded]="!collapsedPanels().has('board')" aria-label="收合交易規劃">⌃</button></div>
       </div>
 
@@ -710,7 +714,7 @@
       }
     </article>
 
-    @if(page()==='legacy'||page()==='stock'){    <details class="panel backtest-panel historical-analysis"><summary>歷史分析（單筆策略／區間多空）</summary>
+    }@if(page()==='legacy'||(page()==='stock'&&stockTab()==='indicators')){    <details class="panel backtest-panel historical-analysis"><summary>歷史分析（單筆策略／區間多空）</summary>
       <div class="panel-header"><h2>單筆策略歷史模擬</h2><span class="badge">{{ chartDays() }} 日 · {{ positionForm().type }}</span></div>
       <p class="backtest-note">將目前表單規劃套用到所選歷史區間，僅模擬一次進場／出場，不使用待成交委託有效日，也不回寫持倉。股票必須與行情一致。資金使用可用現金，全名目部位、不使用槓桿。</p>
       @if (positionForm().symbol !== stockSymbol()) { <p class="error-text">表單股票與圖表股票不同，請先選取同一股票。</p> }

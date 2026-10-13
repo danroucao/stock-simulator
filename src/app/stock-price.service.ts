@@ -39,6 +39,7 @@ interface MisQuoteResponse {
 }
 
 export interface StockQuote {
+  changeKnown?:boolean;
   date: string;
   name: string;
   open: number;

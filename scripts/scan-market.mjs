@@ -4,6 +4,7 @@ import { loadOfficialMarket } from './official-market-data.mjs';
 import { writeAlertDelivery } from './alert-delivery.mjs';
 import {analyzeStock,industryHeat} from '../src/app/services/market-analysis.ts';
 import {parseCompanyRegistry} from './official-market-data.mjs';
+import {heatComparison} from '../src/app/services/market-heat-comparison.ts';
 
 const output = 'public/alerts/latest.json', statePath = 'scan-data/state.json';
 const read = async (path, fallback) => { try { return JSON.parse(await readFile(path, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } };
@@ -109,10 +110,10 @@ try {
   const analyzed=[...universe.values()].map(stock=>analyzeStock(stock,all.get(stock.symbol),sessions,metadata.priceBasis,priceRows.get(stock.symbol)));
   const classificationKey=[...universe.values()].map(s=>s.symbol+':'+s.industryCode).sort().join('|');
   const classificationHistory=await Promise.all(sessions.slice(-21,-1).map(date=>read('public/market/snapshots/'+date+'.json',null)));
-  const classificationStable=classificationHistory.length===20 && classificationHistory.every(snapshot=>snapshot?.classificationKey===classificationKey);
+  const comparison=heatComparison([...universe.values()],all,sessions,[...classificationHistory,{date:expectedMarketDate,stocks:analyzed}]);
   const analysis={schemaVersion:2,date:expectedMarketDate,scannedAt:result.scannedAt,status:'ready',basis:metadata.priceBasis,calendarYears:metadata.calendarYears,closedDates:metadata.closedDates,classificationDate:[...new Set([...universe.values()].map(s=>s.industryDate||'未提供'))].join('／'),classificationKey,
-    volatilityDefinition:'前 20 個交易日簡單日報酬（需 21 個收盤）的樣本標準差 × 100%；未年化。',stocks:analyzed,
-    industryHeat:industryHeat([...universe.values()],all,sessions,classificationStable),historyComparable:classificationStable,
+    expectedDate:metadata.expectedMarketDate,dataDelay:metadata.dataDelay,volatilityDefinition:'前 20 個交易日簡單日報酬（需 21 個收盤）的樣本標準差 × 100%；未年化。',stocks:analyzed,
+    industryHeat:industryHeat([...universe.values()],all,sessions,comparison),heatComparison:comparison,historyComparable:comparison.available,
     coverage:{checked:analyzed.length,total:universe.size,complete:analyzed.filter(s=>s.availability==='complete').length,partial:analyzed.filter(s=>s.availability==='partial').length,none:analyzed.filter(s=>s.availability==='none').length,
       twse:analyzed.filter(s=>s.market==='twse'&&s.metrics.turnover.value!==null).length,tpex:analyzed.filter(s=>s.market==='tpex'&&s.metrics.turnover.value!==null).length}};
   await atomic('public/market/latest.json',analysis);

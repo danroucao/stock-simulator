@@ -1,5 +1,6 @@
 import { ALERT_RULES } from './market-alerts.ts';
 import type { DailyBar, MarketStock, AlertStock } from './market-alerts.ts';
+import type { HeatComparison } from './market-heat-comparison.ts';
 
 export const INDUSTRIES: Record<string, string> = {
   '01': '水泥工業',
@@ -65,6 +66,7 @@ export interface AnalysisStock extends MarketStock {
   smaDirection: string;
   consolidating: boolean | null;
   state: string;
+  stateReason?: string;
   eventDate: string | null;
   range?: AlertStock['range'];
   lower: number | null;
@@ -72,6 +74,8 @@ export interface AnalysisStock extends MarketStock {
   availability: 'complete' | 'partial' | 'none';
 }
 export interface IndustryHeat {
+  comparisonShare?: number|null;
+  comparisonStocks?: number;
   industry: string;
   turnover: number;
   share: number;
@@ -88,6 +92,9 @@ export interface IndustryHeat {
   comparisonReason: string | null;
 }
 export interface MarketAnalysisFeed {
+  heatComparison?: HeatComparison;
+  expectedDate?: string;
+  dataDelay?: string;
   calendarYears?:number[];
   closedDates?:string[];
   schemaVersion: 2;
@@ -295,6 +302,7 @@ export function analyzeStock(
           Math.abs(trend) <= ALERT_RULES.maxTrend * 100 + 1e-8 &&
           Math.abs(smaChange) <= ALERT_RULES.maxSmaChange * 100 + 1e-8,
     state: row?.eligible ? row.status : '資料不足',
+    stateReason:row?.exclusion||row?.reason||'沒有可用的區間觀察依據，請查看各指標原因',
     eventDate: row?.eventDate || null,
     range: row?.eligible ? row.range : undefined,
     lower,
@@ -307,7 +315,7 @@ export function industryHeat(
   universe: MarketStock[],
   all: Map<string, DailyBar[]>,
   sessions: string[],
-  classificationComparable: boolean,
+  classificationComparable: boolean | HeatComparison,
 ): IndustryHeat[] {
   const date = sessions.at(-1)!,
     groups = [...new Set(universe.map((s) => s.industry || '未分類'))];
@@ -322,17 +330,19 @@ export function industryHeat(
       }, 0),
     ]),
   );
+  const cohort=typeof classificationComparable==='boolean'?universe:universe.filter(s=>classificationComparable.symbols.includes(s.symbol));
+  const comparisonTotals=new Map(days.map(d=>[d,cohort.reduce((a,s)=>a+(all.get(s.symbol)?.find(b=>b.date===d)?.turnover||0),0)]));
   const completeDays = days
     .slice(0, -1)
     .filter(
       (d) =>
         dayTotals.get(d)! > 0 &&
-        universe.every((s) => valid(all.get(s.symbol)?.find((b) => b.date === d))),
+        cohort.every((s) => valid(all.get(s.symbol)?.find((b) => b.date === d))),
     );
   const comparable =
-    classificationComparable &&
+    (typeof classificationComparable==='boolean'?classificationComparable:classificationComparable.available) &&
     completeDays.length === 20 &&
-    universe.every((s) => valid(all.get(s.symbol)?.find((b) => b.date === date)));
+    cohort.every((s) => valid(all.get(s.symbol)?.find((b) => b.date === date)));
   return groups
     .map((industry) => {
       const members = universe.filter((s) => (s.industry || '未分類') === industry),
@@ -340,14 +350,16 @@ export function industryHeat(
         usable = current.filter((x) => valid(x.b)),
         turnover = usable.reduce((a, x) => a + x.b!.turnover, 0),
         total = dayTotals.get(date) || 0;
-      const averageShare = comparable
+      const comparisonMembers=members.filter(s=>cohort.some(c=>c.symbol===s.symbol));
+      const comparisonShare=comparable&&comparisonMembers.length ? comparisonMembers.reduce((a,s)=>a+all.get(s.symbol)!.find(b=>b.date===date)!.turnover,0)/comparisonTotals.get(date)!*100:null;
+      const averageShare = comparable&&comparisonMembers.length
         ? mean(
             completeDays.map(
               (d) =>
-                members.reduce(
+                comparisonMembers.reduce(
                   (a, s) => a + all.get(s.symbol)!.find((b) => b.date === d)!.turnover,
                   0,
-                ) / dayTotals.get(d)!,
+                ) / comparisonTotals.get(d)!,
             ),
           ) * 100
         : null;
@@ -383,7 +395,9 @@ export function industryHeat(
         turnover,
         share,
         averageShare,
-        changePoints: averageShare === null ? null : share - averageShare,
+        comparisonShare,
+        comparisonStocks:comparisonMembers.length,
+        changePoints: averageShare === null || comparisonShare===null ? null : comparisonShare - averageShare,
         up,
         down,
         flat,
@@ -393,7 +407,7 @@ export function industryHeat(
         top,
         concentration:
           turnover > 0 ? (top.reduce((a, s) => a + s.turnover, 0) / turnover) * 100 : null,
-        comparisonReason: comparable ? null : '前 20 日普通股覆蓋或分類一致性未通過，不能比較',
+        comparisonReason: averageShare!==null ? null : typeof classificationComparable==='boolean'?'前 20 日普通股覆蓋或分類一致性未通過，不能比較':classificationComparable.issues.find(i=>!i.symbols)?.reason||'本產業沒有符合 21 日完整分類與成交金額的固定可比樣本',
       };
     })
     .sort((a, b) => b.turnover - a.turnover);
