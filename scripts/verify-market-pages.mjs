@@ -16,7 +16,11 @@ try{for(const width of [1280,390]){
  await screen.getByLabel('搜尋股票',{exact:true}).fill('2353');await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===1);
  await screen.getByRole('link',{name:'查看個股',exact:true}).click();await page.waitForURL('**#/stock/2353?from=screener');
  await page.getByRole('heading',{name:/2353.*個股分析/}).waitFor();await page.locator('app-workspace #market-chart svg.stock-chart path.chart-line').waitFor();
- await page.getByRole('link',{name:'返回選股中心',exact:true}).click();await screen.waitFor();assert.equal(await screen.getByLabel('搜尋股票',{exact:true}).inputValue(),'2353');
+ await page.getByRole('link',{name:'返回選股中心',exact:true}).click();await screen.waitFor();
+ // The lazy route host can attach before Angular has bound the restored input.
+ // Wait for the observable state, not just the component host; a lost filter still times out.
+ await page.waitForFunction(()=>document.querySelector('app-screener input')?.value==='2353');
+ assert.equal(await screen.getByLabel('搜尋股票',{exact:true}).inputValue(),'2353');
  await screen.getByRole('button',{name:'自訂',exact:true}).click();await screen.getByRole('button',{name:'載入更多 20 檔'}).click();await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===40);
  await screen.getByRole('button',{name:'均線偏低',exact:true}).click();await page.waitForTimeout(100);for(const row of await screen.locator('tbody tr').all())assert.ok((await row.textContent()).includes('均線偏離'));
  await screen.getByText('儲存條件與站內追蹤',{exact:true}).click();await screen.getByLabel('條件名稱',{exact:true}).fill('測試條件');await screen.getByLabel('啟用站內事件追蹤',{exact:true}).check();await screen.getByRole('button',{name:'儲存條件',exact:true}).click();await screen.getByRole('button',{name:'套用 測試條件',exact:true}).waitFor();
