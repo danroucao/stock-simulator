@@ -1,7 +1,8 @@
 import { PresetOrder, PresetFill } from '../models/trade-position.model';
 
 export async function buildFillHistoryWorkbook(fills: PresetFill[], names: Record<string, string>) {
-  const { Workbook } = await import('exceljs');
+  const loaded=await import('exceljs');
+  const {Workbook}=loaded.default ?? loaded;
   const book = new Workbook();
   book.creator = 'Stock Trading Simulator';
   book.created = new Date();
@@ -32,7 +33,8 @@ export async function buildFillHistoryWorkbook(fills: PresetFill[], names: Recor
 }
 
 export async function buildPresetOrderWorkbook(orders: PresetOrder[], names: Record<string, string>, filterDescription = '全部記錄') {
-  const { Workbook } = await import('exceljs');
+  const loaded=await import('exceljs');
+  const {Workbook}=loaded.default ?? loaded;
   const book = new Workbook();
   book.creator = 'Stock Trading Simulator';
   book.created = new Date();

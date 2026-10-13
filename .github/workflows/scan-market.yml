@@ -8,6 +8,7 @@ on:
       - 'scripts/official-market-data.mjs'
       - 'scripts/alert-delivery.mjs'
       - 'src/app/services/market-alerts.ts'
+      - 'src/app/services/market-analysis.ts'
   schedule:
     - cron: '20 11 * * 1-5' # 19:20 Asia/Taipei; actual dates come from the trading calendar
   workflow_dispatch:
@@ -68,8 +69,12 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add public/alerts/latest.json public/alerts/index.json public/alerts/history.json
-          if [ "$SCAN_OUTCOME" = success ]; then git add scan-data/state.json; fi
+          if [ "$SCAN_OUTCOME" = success ]; then
+            git add public/alerts public/market scan-data/state.json
+          else
+            git add public/alerts/latest.json public/alerts/index.json
+            if [ -f public/market/latest.json ]; then git add public/market/latest.json; fi
+          fi
           if ! git diff --cached --quiet; then
             git commit -m 'Update daily market alerts'
             git push

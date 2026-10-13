@@ -16,6 +16,7 @@ export function validateAlertFeed(value: unknown): value is AlertFeed {
     (v.scannedAt === null || Number.isFinite(Date.parse(v.scannedAt))) &&
     (v.priceBasis===undefined || ['adjusted','raw-action-screened'].includes(v.priceBasis)) &&
     (v.historyVersion===undefined || typeof v.historyVersion==='string') &&
+    (v.historyDelivery===undefined || v.historyDelivery==='symbol') &&
     (v.baselineDate===undefined || date(v.baselineDate)) &&
     (v.calendarYears===undefined || Array.isArray(v.calendarYears) && v.calendarYears.every(Number.isInteger)) &&
     (v.closedDates===undefined || Array.isArray(v.closedDates) && v.closedDates.every(date)) &&
@@ -72,7 +73,9 @@ export class AlertStore {
     try { localStorage.setItem(this.key,JSON.stringify(next)); this.follows.set(next); this.storageError.set(''); }
     catch { this.storageError.set('瀏覽器無法儲存追蹤設定，請檢查儲存空間或隱私設定後重試。'); }
   }
-  async load(): Promise<void> {
+  private pending?:Promise<void>;
+  load():Promise<void>{if(!this.pending)this.pending=this.loadFeed().finally(()=>this.pending=undefined);return this.pending;}
+  private async loadFeed(): Promise<void> {
     if (this.loading()) return;
     this.loading.set(true); this.error.set('');
     try {
@@ -97,6 +100,14 @@ export class AlertStore {
     finally { this.loading.set(false); }
   }
   async loadHistory(stock: AlertFeed['stocks'][number]): Promise<import('./market-alerts').DailyBar[]> {
+    if(this.feed()?.historyDelivery==='symbol'){
+      const url=new URL('alerts/history/'+stock.symbol+'.json',document.baseURI);url.searchParams.set('v',this.feed()?.historyVersion||'');
+      const response=await fetch(url,{cache:'no-cache',signal:AbortSignal.timeout(30000)});
+      if(!response.ok)throw new Error('個股歷史讀取失敗，請重試');
+      const data=await response.json();
+      if(data.schemaVersion!==1||data.symbol!==stock.symbol||data.version!==this.feed()?.historyVersion||!Array.isArray(data.bars)||data.bars.some((b:import('./market-alerts').DailyBar)=>b.date>stock.date || ![b.open,b.high,b.low,b.close,b.rawClose,b.volume,b.turnover].every(Number.isFinite)))throw new Error('個股歷史版本或格式不符');
+      return data.bars;
+    }
     if(stock.history.length || !stock.eligible)return stock.history;
     const version=this.feed()?.historyVersion;if(!version)return [];
     if(this.histories?.version!==version) {

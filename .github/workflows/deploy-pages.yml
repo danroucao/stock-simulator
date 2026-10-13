@@ -53,6 +53,15 @@ jobs:
           REPOSITORY_NAME="${GITHUB_REPOSITORY#*/}"
           npm run build -- --configuration production --base-href "/${REPOSITORY_NAME}/"
 
+      - name: Audit committed full-market data
+        run: npm run verify:market-data
+
+      - name: Install verification browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify built routes, screening and trading before publication
+        run: npm run verify:pages-build
+
       - name: Add GitHub Pages fallback files
         shell: bash
         run: |

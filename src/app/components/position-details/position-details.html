@@ -9,7 +9,7 @@
     <article class="position-group" [class.expanded]="expandedSymbols().has(group.symbol)">
       <button type="button" class="position-group-header" (click)="toggle(group.symbol)" [attr.aria-expanded]="expandedSymbols().has(group.symbol)">
         <span class="group-chevron">›</span>
-        <span class="group-symbol"><strong>{{ group.symbol }}</strong><small>{{ group.positions.length }} 筆持倉 · {{ group.shares | number:'1.0-0' }} 股</small></span>
+        <span class="group-symbol"><strong>{{ group.symbol }}@if (namesBySymbol()[group.symbol]) { · {{ namesBySymbol()[group.symbol] }} }</strong><small>{{ group.positions.length }} 筆持倉 · {{ group.shares | number:'1.0-0' }} 股</small></span>
         <span><small>投入成本</small><strong>{{ group.cost | number:'1.0-0' }}</strong></span>
         <span><small>{{ hasQuote(group.symbol) ? '最近取得價格' : '估算價格（缺行情）' }}</small><strong>{{ marketPriceFor(group.symbol) | number:'1.0-2' }}</strong></span>
         <span><small>未實現損益</small><strong [class.positive]="group.profit >= 0" [class.negative]="group.profit < 0">{{ group.profit >= 0 ? '+' : '' }}{{ group.profit | number:'1.0-0' }}</strong></span>

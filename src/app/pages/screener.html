@@ -1,0 +1,355 @@
+<section class="market-page">
+  <header>
+    <div>
+      <h1>選股中心</h1>
+      <p>先看全市場分析，再組合你的觀察條件。</p>
+    </div>
+    <button (click)="store.load()" [disabled]="store.loading()">
+      {{ store.loading() ? '更新中…' : '重新讀取' }}
+    </button>
+  </header>
+  @if (store.error()) {
+    <p class="notice" role="alert">{{ store.error() }}</p>
+  }
+  @if (store.feed(); as feed) {
+    @if(store.freshness()){<p class="notice" role="status">{{store.freshness()}}</p>}<p class="status-line">
+      行情 {{ feed.date }} · 掃描 {{ store.time(feed.scannedAt) }}（台北） · 已檢查
+      {{ feed.coverage.checked }}／{{ feed.coverage.total }} 檔｜完整可分析
+      {{ feed.coverage.complete }} 檔｜部分可分析 {{ feed.coverage.partial }} 檔｜無可用分析
+      {{ feed.coverage.none }} 檔
+    </p>
+    @if (feed.status === 'error') {
+      <p class="notice" role="alert">最近掃描失敗，保留原資料日期：{{ feed.message }}</p>
+    }
+    <details>
+      <summary>資料範圍與可用性定義</summary><p>盤整三條件：45 日最高／最低−1 不超過 15%；收盤線性迴歸斜率 ×44／45 日平均收盤的全期估計變動在 ±5%；SMA60 相對 10 個交易日前在 ±3%。保存區間另需完整價格與近 45 日無零成交；流動性門檻由使用者篩選，原提醒策略仍有其獨立門檻。</p>
+      <p>
+        上市＋上櫃普通股；不包含
+        ETF。完整表示九個技術／流動性指標均可計算；部分表示至少一個可用；無可用分析表示九個皆不可用，仍可有當日成交資訊。此計數與是否符合選股條件無關。
+      </p>
+      <p>
+        {{
+          feed.volatilityDefinition
+        }}
+        「今日突破／跌破」以最新行情交易日為準。高低波動預設採本交易日所有可計算普通股的第 75／25
+        百分位，可修改，不是標準買賣門檻。價格方向以 45 日 OLS 全期估計變動大於 +1%／低於 −1%
+        定義，屬介面觀察參數。
+      </p>
+      <p>
+        公司行動期間的原始價格指標不使用；恢復時建立新的觀察基準，不沿用失效區間。未分類保留；官方分類截至
+        {{ feed.classificationDate }}。
+      </p>
+    </details>
+  }
+  <div class="quick" aria-label="快速篩選">
+    @for (
+      kind of [
+        '盤整',
+        '接近上緣',
+        '今日突破',
+        '今日跌破',
+        '高波動',
+        '低波動',
+        '均線偏高',
+        '均線偏低',
+        '自訂',
+      ];
+      track kind
+    ) {
+      <button (click)="preset(kind)">{{ kind }}</button>
+    }
+  </div>
+  <div class="filters">
+    <label
+      >搜尋股票<input
+        [value]="filter().query"
+        (input)="update({ query: $any($event.target).value })"
+        placeholder="代號或名稱" /></label
+    ><label
+      >市場<select
+        aria-label="市場"
+        [value]="filter().market"
+        (change)="update({ market: $any($event.target).value })"
+      >
+        <option value="all">上市＋上櫃</option>
+        <option value="twse">上市</option>
+        <option value="tpex">上櫃</option>
+      </select></label
+    ><label
+      >產業<select
+        aria-label="產業"
+        [value]="filter().industry"
+        (change)="update({ industry: $any($event.target).value })"
+      >
+        <option value="all">全部產業</option>
+        @for (industry of industries(); track industry) {
+          <option [value]="industry" [selected]="filter().industry === industry">
+            {{ industry }}
+          </option>
+        }
+      </select></label
+    ><label
+      >排序<select
+        aria-label="排序"
+        [value]="filter().sort"
+        (change)="update({ sort: $any($event.target).value })"
+      >
+        @for (
+          field of [
+            { key: 'turnover', label: '成交金額' },
+            { key: 'distance', label: '距上緣' },
+            { key: 'volatility', label: '波動率' },
+            { key: 'deviation', label: '均線偏離' },
+          ];
+          track field.key
+        ) {
+          <option [value]="field.key">{{ field.label }}</option>
+        }
+      </select></label
+    ><button
+      [attr.aria-pressed]="filter().descending"
+      (click)="update({ descending: !filter().descending })"
+    >
+      {{ filter().descending ? '由高到低' : '由低到高' }}
+    </button>
+  </div>
+  <details class="custom">
+    <summary>自訂條件（全部以 AND 組合）</summary>
+    <div class="filters">
+      <label
+        >盤整判定<select
+          aria-label="盤整判定"
+          [value]="filter().consolidation"
+          (change)="update({ consolidation: $any($event.target).value })"
+        >
+          <option value="all">不限</option>
+          <option value="yes">符合三條件</option>
+          <option value="no">不符合三條件</option>
+        </select></label
+      ><label>區間狀態<select aria-label="區間狀態" [value]="filter().state" (change)="update({state:$any($event.target).value})"><option value="all">不限</option>@for(state of ['整理中','突破待確認','跌破區間','回到原區間','今日突破','今日跌破'];track state){<option [value]="state">{{state}}</option>}</select></label><label
+        >價格方向<select
+          aria-label="價格方向"
+          [value]="filter().direction"
+          (change)="update({ direction: $any($event.target).value })"
+        >
+          <option value="all">不限</option>
+          @for (direction of ['上升', '下降', '平穩']; track direction) {
+            <option [value]="direction">{{ direction }}</option>
+          }
+        </select></label
+      >
+      @for (field of fields; track field.key) {
+        <fieldset>
+          <legend>{{ field.label }}</legend>
+          <label
+            >最小<input
+              type="number"
+              [value]="filter().bounds[field.key]?.min ?? ''"
+              (input)="bound(field.key, 'min', $any($event.target).value)" /></label
+          ><label
+            >最大<input
+              type="number"
+              [value]="filter().bounds[field.key]?.max ?? ''"
+              (input)="bound(field.key, 'max', $any($event.target).value)"
+          /></label>
+        </fieldset>
+      }
+    </div>
+  </details>
+  <p role="status">{{ status() }}</p>
+  <div class="chips">
+    <strong>已套用：</strong>
+    @for (label of applied(); track label) {
+      <span>{{ label }}</span>
+    } @empty {
+      <span>全部股票</span>
+    }
+    <button (click)="preset('自訂')">清除全部條件</button>
+  </div>
+  <p>{{ rows().length }} 檔符合 · 已顯示 {{ visible().length }} 檔。未知數值不通過數值條件。</p>
+  <div class="results">
+    <table>
+      <thead>
+        <tr>
+          <th>股票／行情</th>
+          <th>價格區間與方向</th>
+          <th>波動與均線</th>
+          <th>流動性／可用性</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (stock of visible(); track stock.symbol) {
+          <tr>
+            <td>
+              <strong>{{ stock.symbol }} {{ stock.name }}</strong
+              ><span>{{ stock.market === 'twse' ? '上市' : '上櫃' }} · {{ stock.industry }}</span
+              ><span
+                >{{
+                  stock.metrics.close.value === null
+                    ? '無有效價格'
+                    : (stock.metrics.close.value | number: '1.0-2') + ' 元'
+                }}
+                ·
+                {{
+                  stock.metrics.change.value === null
+                    ? '漲跌未知'
+                    : (stock.metrics.change.value | number: '1.2-2') + '%'
+                }}</span
+              ><small>行情 {{ stock.date }}</small>
+            </td>
+            <td>
+              <span
+                >盤整
+                {{
+                  stock.consolidating === null
+                    ? '無法判定'
+                    : stock.consolidating
+                      ? '符合'
+                      : '不符合'
+                }}
+                · {{ stock.direction }}</span
+              ><span
+                >寬度
+                {{
+                  stock.metrics.width.value === null
+                    ? '未知'
+                    : (stock.metrics.width.value | number: '1.1-1') + '%'
+                }}</span
+              ><span
+                >趨勢
+                {{
+                  stock.metrics.trend.value === null
+                    ? '未知'
+                    : (stock.metrics.trend.value | number: '1.1-1') + '%'
+                }}</span
+              ><span>{{ stock.state }}</span>
+              @if (stock.metrics.distance.value !== null) {
+                <small>距上緣 {{ stock.metrics.distance.value | number: '1.1-1' }}%</small>
+              }
+            </td>
+            <td>
+              <span
+                >20 日波動
+                {{
+                  stock.metrics.volatility.value === null
+                    ? '未知'
+                    : (stock.metrics.volatility.value | number: '1.2-2') + '%'
+                }}</span
+              ><span
+                >均線偏離
+                {{
+                  stock.metrics.deviation.value === null
+                    ? '未知'
+                    : (stock.metrics.deviation.value | number: '1.1-1') + '%'
+                }}</span
+              ><small
+                >{{ stock.smaDirection }} · SMA5
+                {{
+                  stock.metrics.sma5.value === null
+                    ? '未知'
+                    : (stock.metrics.sma5.value | number: '1.2-2')
+                }}／SMA60
+                {{
+                  stock.metrics.sma60.value === null
+                    ? '未知'
+                    : (stock.metrics.sma60.value | number: '1.2-2')
+                }}</small
+              >
+            </td>
+            <td>
+              <span
+                >45 日平均成交
+                {{
+                  stock.metrics.averageTurnover.value === null
+                    ? '未知'
+                    : (stock.metrics.averageTurnover.value | number: '1.0-0') + ' 元'
+                }}</span
+              ><span
+                >無成交
+                {{
+                  stock.metrics.zeroDays.value === null
+                    ? '未知'
+                    : stock.metrics.zeroDays.value + ' 日'
+                }}</span
+              >
+              <details>
+                <summary>
+                  {{
+                    stock.availability === 'complete'
+                      ? '完整可分析'
+                      : stock.availability === 'partial'
+                        ? '部分可分析'
+                        : '無可用分析'
+                  }}
+                </summary>
+                @for (field of fields; track field.key) {
+                  @if (stock.metrics[field.key].reason) {
+                    <p>{{ field.label }}：{{ stock.metrics[field.key].reason }}</p>
+                  }
+                }
+                @if (stock.metrics.sma60.reason) {
+                  <p>SMA60：{{ stock.metrics.sma60.reason }}</p>
+                }
+              </details>
+            </td>
+            <td>
+              <a [routerLink]="['/stock', stock.symbol]" [queryParams]="{ from: 'screener' }"
+                >查看個股</a
+              ><button
+                (click)="alerts.toggle(stock)"
+                [attr.aria-pressed]="alerts.following(stock.symbol)"
+              >
+                {{ alerts.following(stock.symbol) ? '★ 已追蹤' : '☆ 加入追蹤' }}
+              </button>
+            </td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="5">
+              {{
+                store.loading() ? '正在讀取市場分析…' : '沒有符合條件的股票；可清除條件或放寬範圍。'
+              }}
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+  @if (visible().length < rows().length) {
+    <button (click)="store.limit.set(store.limit() + 20)">載入更多 20 檔</button>
+  }
+  <details>
+    <summary>儲存條件與站內追蹤</summary>
+    <div class="filters">
+      <label
+        >條件名稱<input
+          [value]="name()"
+          (input)="name.set($any($event.target).value)"
+          maxlength="60" /></label
+      ><label
+        ><input
+          type="checkbox"
+          [checked]="tracking()"
+          (change)="tracking.set($any($event.target).checked)"
+        />啟用站內事件追蹤</label
+      ><button (click)="save()" [disabled]="store.loading()">儲存條件</button>
+    </div>
+    <p>
+      只在此瀏覽器保存。首次名單事件最多顯示 20 檔，完整符合名單可按「套用」查看；保留最近 500
+      筆事件，所有股票比較狀態仍保存。開啟網站取得新快照時比較；關閉期間沒有伺服器監測私人條件。兩次快照之間的變化不代表中途首次觸發日期。
+    </p>
+    @for (item of store.saved(); track item.id) {
+      <div class="saved">
+        <button (click)="store.apply(item)">套用 {{ item.name }}</button
+        ><button [attr.aria-pressed]="item.tracking" (click)="store.toggle(item.id)">
+          {{ item.tracking ? '停止追蹤' : '啟用追蹤' }}</button
+        ><button (click)="store.remove(item.id)">刪除</button
+        ><small
+          >前次比較 {{ item.date || '尚未比較' }} · 資料不足 {{ item.unknown.length }} 檔 · 首次基準
+          {{ item.baselineCount ?? 0 }} 檔</small
+        >
+      </div>
+    }
+  </details>
+</section>

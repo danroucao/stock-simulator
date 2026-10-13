@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { normalizeOfficialDate, parseDailyQuotes, parseCorporateActions, parseClosedDates, parseTradingMonth, loadOfficialMarket, ACTION_SOURCES } from './official-market-data.mjs';
+import { normalizeOfficialDate, parseCompanyRegistry,parseDailyQuotes, parseCorporateActions, parseClosedDates, parseTradingMonth, loadOfficialMarket, ACTION_SOURCES } from './official-market-data.mjs';
 
 const universe = new Map([['2330',{symbol:'2330',name:'台積電',market:'twse'}],['6182',{symbol:'6182',name:'合晶',market:'tpex'}]]);
 const twseFields=['證券代號','證券名稱','成交股數','成交筆數','成交金額','開盤價','最高價','最低價','收盤價','漲跌(+/-)','漲跌價差'];
@@ -12,6 +12,10 @@ const quote=(market,date='2026-10-08',rows)=>({stat:'ok',date:date.replaceAll('-
 test('official ROC, Chinese and Gregorian dates normalize with validity checks',()=>{
  for(const date of ['115/10/08','115年10月08日','1151008','20261008','2026-10-08']) assert.equal(normalizeOfficialDate(date),'2026-10-08');
  assert.throws(()=>normalizeOfficialDate('115/02/30'));
+});
+test('official registry industries use both source field names and exclude TDR issuers',()=>{
+ const rows=Array.from({length:601},(_,i)=>({'公司代號':String(1000+i),'公司簡稱':'測試','產業別':'24','出表日期':'1151012'}));rows.push({'公司代號':'9103','公司簡稱':'測試-DR','產業別':'91','出表日期':'1151012'});const listed=parseCompanyRegistry(rows,'twse');assert.equal(listed.get('1000').industry,'半導體業');assert.equal(listed.has('9103'),false);
+ const otc=parseCompanyRegistry(Array.from({length:401},(_,i)=>({SecuritiesCompanyCode:String(3000+i),CompanyAbbreviation:'測試',SecuritiesIndustryCode:'33',Date:'1151012'})),'tpex');assert.equal(otc.get('3000').industry,'農業科技業');assert.equal(otc.get('3000').industryDate,'2026-10-12');
 });
 test('daily table headers establish units; ETF/warrants are excluded using the registry',()=>{
  const body=quote('twse');body.tables[0].data.push(['0050','ETF','1','1','1','1','1','1','1','+','0']);

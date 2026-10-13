@@ -25,7 +25,6 @@ describe('App', () => {
     expect(app.presetOrders().at(-1).reminderSource.rangeId).toBe('internal-range');
     const raw=app.workspaceBackupJson();expect(JSON.parse(raw).presetOrders.at(-1).reminderSource.ruleVersion).toBe('tw-daily-v2-official-safe');
   });
-
   it('reserves fees for pending entries and rejects invalid financial inputs', () => {
     const app = TestBed.createComponent(App).componentInstance as any;
     app.presetOrders.set([{ id: 'reserve-fee', symbol: '2330', type: '現股多單', shares: 1000, entryPrice: 100, validDays: 1, createdAt: app.todayDate(), expiryDate: app.todayDate() }]);
@@ -471,6 +470,7 @@ describe('App', () => {
         {
           provide: StockPriceService,
           useValue: {
+            getStockName: () => of(''),
             getLatestQuote: () =>
               of({
                 date: '2026/08/01',
@@ -695,7 +695,7 @@ describe('App', () => {
     const candleWick = compiled.querySelector('.stock-chart line[stroke-width="2"]');
     expect(candleWick?.getAttribute('x1')).toBe(candleWick?.getAttribute('x2'));
     expect(compiled.querySelectorAll('.stock-chart .chart-grid-line').length).toBe(5);
-    expect(compiled.querySelectorAll('.stock-chart .chart-date-label').length).toBeGreaterThanOrEqual(2);
+    expect(compiled.querySelector('.stock-chart')?.parentElement?.querySelectorAll('.chart-dates time').length).toBe(fixture.componentInstance['history']().length);
   });
 
   it('should use Taiwan market colors: red for rising and green for falling candles', async () => {

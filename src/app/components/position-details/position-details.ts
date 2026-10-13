@@ -17,6 +17,7 @@ export class PositionDetails {
   readonly quoteUpdating = input(false);
   readonly fallbackPrice = input.required<number>();
   readonly pricesBySymbol = input<Record<string, number>>({});
+  readonly namesBySymbol = input<Record<string, string>>({});
   readonly feeDiscount = input(1);
   readonly asOfDate = input(new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date()));
   readonly financingRate = input(0);

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import {INDUSTRIES} from '../src/app/services/market-analysis.ts';
 
 export const OFFICIAL_SOURCE_VERSION = 1;
 export const ACTION_SOURCES = [
@@ -45,7 +46,13 @@ export function parseCompanyRegistry(body, market) {
   for (const row of body) {
     const symbol = stripped(row['公司代號'] ?? row.SecuritiesCompanyCode);
     const name = String(row['公司簡稱'] ?? row.CompanyAbbreviation ?? '').trim();
-    if (/^[1-9]\d{3}$/.test(symbol) && name) stocks.set(symbol,{symbol,name,market});
+    const raw=String(row['產業別'] ?? row.SecuritiesIndustryCode ?? row.Industry ?? row.IndustryCode ?? '').trim();
+    const industryCode=/^\d{1,2}$/.test(raw)?raw.padStart(2,'0'):null;
+    // MOPS registry includes TDR issuers (industry 91); those are not ordinary shares.
+    if(industryCode==='91')continue;
+    const reportDate=row['出表日期']??row.Date;
+    const industryDate=reportDate?normalizeOfficialDate(reportDate):undefined;
+    if (/^[1-9]\d{3}$/.test(symbol) && name) stocks.set(symbol,{symbol,name,market,industryCode,industryDate,industry:industryCode?INDUSTRIES[industryCode]||'未分類':'未分類'});
   }
   if (stocks.size < (market==='twse' ? 500 : 300)) throw new Error(`${market} 普通股名冊無法解析`);
   return stocks;
@@ -220,7 +227,9 @@ export async function loadOfficialMarket({ cacheRoot='scan-data/official', now=n
   for(const bars of all.values()) for(let i=1;i<bars.length;i++) {
     const previous=bars[i-1], current=bars[i];
     if (previous.close>0 && current.close>0 && current.volume>0 &&
-        (Math.abs(current.close/previous.close-1)>.115 || current.change!==null && Math.abs(current.close-current.change-previous.close)>Math.max(.03,previous.close*.0001)))
+        (typeof current.change==='number' && Number.isFinite(current.change)
+          ? Math.abs(current.close-current.change-previous.close)>Math.max(.03,previous.close*.0001)
+          : Math.abs(current.close/previous.close-1)>.115))
       current.action ||= '未確認價格基準異動';
   }
   const closed=new Set([...calendars.values()].flatMap(set=>[...set]));

@@ -12,7 +12,7 @@ export interface DailyBar {
   action?: string;
   dataIssue?: string;
 }
-export interface MarketStock { symbol: string; name: string; market: 'twse' | 'tpex'; }
+export interface MarketStock { symbol: string; name: string; market: 'twse' | 'tpex'; industry?:string;industryCode?:string|null;industryDate?:string; }
 export interface RangeSnapshot {
   id: string; date: string; lower: number; upper: number; anchorClose: number; version: string;
 }
@@ -28,6 +28,7 @@ export interface AlertStock extends MarketStock {
   volumeRatio: number; history: DailyBar[]; eligible: boolean; exclusion?: string;
 }
 export interface StockScanState {
+  suspended?:boolean;
   lastDate?: string; range?: RangeSnapshot; rangeStatus?: RangeStatus;
   lastEventDate?: string;
   deviation?: 'low' | 'high' | 'normal'; retiredDate?: string;
@@ -41,6 +42,7 @@ export interface AlertFeed {
   dataSource?: string; priceBasis?: 'adjusted' | 'raw-action-screened'; safetyWindow?: number;
   actionSources?: string[]; actionExcludedCount?: number; calendarYears?: number[]; closedDates?: string[];
   historyVersion?: string;
+  historyDelivery?:'symbol';
 }
 const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 const near = 1e-10;
@@ -95,14 +97,16 @@ export function scanStock(stock: MarketStock, bars: DailyBar[], sessions: string
     const ratio = sma60 > 0 ? sma5 / sma60 : 1, deviation = (ratio-1)*100;
     const volumeMean = mean(history.slice(-21,-1).map(b => b.volume));
     const volumeRatio = volumeMean > 0 ? latest.volume / volumeMean : 0;
+    let recovering=false;
     const kinds: AlertKind[] = []; let status = '未符合觀察條件', reason = '目前未符合整理或均線偏離觀察門檻。';
     let lower: number | undefined, upper: number | undefined;
     const push = (kind: AlertKind, eventStatus: string, text: string) => {
-      if (emit) { state.lastEventDate = date; events.push({ origin:previous.lastDate ? 'transition' : 'initial', id:`${rules.version}:${stock.symbol}:${date}:${kind}:${eventStatus}:${state.range?.id ?? ''}`,
+      if (emit) { state.lastEventDate = date; events.push({ origin:previous.lastDate && !recovering ? 'transition' : 'initial', id:`${rules.version}:${stock.symbol}:${date}:${kind}:${eventStatus}:${state.range?.id ?? ''}`,
         symbol:stock.symbol, date, kind, status:eventStatus, reason:text,
         range: state.range ? structuredClone(state.range) : undefined, lower, upper, deviation, volumeRatio }); }
     };
     if (!exclusion) {
+      if(state.suspended){recovering=true;state.range=undefined;state.rangeStatus=undefined;state.deviation=undefined;state.retiredDate=undefined;state.suspended=false;}
       if (state.range) {
         const anchor = original.find(b => b.date === state.range!.date);
         const age = sessions.filter(d => d > state.range!.date && d <= date).length;
@@ -145,6 +149,7 @@ export function scanStock(stock: MarketStock, bars: DailyBar[], sessions: string
         push('均線偏離', nextDeviation === 'normal' ? '離開偏離門檻' : nextDeviation === 'low' ? '均線偏低' : '均線偏高', nextDeviation === 'normal' ? '均線偏離已回到觀察門檻內。' : deviationReason);
       state.deviation = nextDeviation;
     }
+    if(exclusion && !exclusion.includes('流動性')) {state.suspended=true;state.range=undefined;state.rangeStatus=undefined;state.deviation=undefined;}
     if (emit) state.lastDate = date;
     row = { ...stock, date:last.date, close:last.rawClose, turnover:last.turnover, status:exclusion ? '資料排除' : status,
       reason:exclusion || reason, kinds:exclusion ? [] : kinds, eventDate:state.lastEventDate || date,
