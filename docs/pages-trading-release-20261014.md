@@ -15,3 +15,9 @@
 正式行情仍截至 2026/10/13，掃描時間 2026/10/13 22:13:41（台北）。公開 feed 與掃描狀態本次未修改；不以發布時間冒充新行情。19 日官方產業分類快照仍缺漏，熱度變化保持不可比較。新版定時成功紀錄尚未取得，push 驗證不算定時發布成功。
 
 原工作區未重設，發布使用獨立 worktree。帳戶 localStorage 保持版本 1，新欄位選填且舊單不推測交易日，不需破壞性遷移。
+
+## 延遲載入補強發布
+
+[PR #5](https://github.com/danroucao/stock-simulator/pull/5) 已合併，版本 `dffe91613e5a3fb981f1870a1c683c6a971ce3c5`。[CI 38519736211](https://github.com/danroucao/stock-simulator/actions/runs/38519736211) 及 [Pages 38520168253](https://github.com/danroucao/stock-simulator/actions/runs/38520168253) 全部成功，單元測試共 172 項。
+
+部署後正式網址 1280／390px 的延遲 feed、委託／Excel、選股返回及個股來源驗證通過。既有成交測試另發現：內嵌錯誤提示被合併為停損／目標欄位名稱，嚴格名稱定位因提示而變動。收尾補強固定兩個欄位的可存取名稱，提示仍由原本說明與警示呈現；交易測試保留失敗畫面診斷。本機建置、成交／備份／Excel 及桌面／手機新委託回歸通過，後續遠端驗證与部署以對應 PR／Actions 紀錄為準。

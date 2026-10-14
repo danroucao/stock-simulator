@@ -49,4 +49,5 @@ jobs:
             tmp/order-planning-*.png
             tmp/ux-revision-*.png
             tmp/screener-drawer-*.png
+            tmp/trading-flow-failure.png
           if-no-files-found: ignore
