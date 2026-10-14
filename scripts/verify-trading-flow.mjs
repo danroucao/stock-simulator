@@ -4,8 +4,10 @@ import { readFile, mkdir } from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 const browser = await chromium.launch({headless:true});
 await mkdir('tmp', { recursive: true });
+let activePage;
 try {
   const page = await browser.newPage({ viewport: process.argv.includes('--mobile') ? { width: 390, height: 844 } : { width: 1280, height: 900 } });
+  activePage=page;
   const base=process.env.WORKSPACE_TEST_URL||'http://localhost:4200/';
   // Explicit test clock: a known trading day, independent of runner weekends/holidays.
   const today = '2026-10-14';
@@ -105,4 +107,10 @@ try {
   await workbook.xlsx.readFile('tmp/flow-fills.xlsx');
   assert.equal(workbook.getWorksheet('實際成交紀錄').getCell('H2').value,400);
   console.log('Verified: create → partial fill + cash → backup → partial close + cash → restore → Excel values');
+} catch(error){
+  if(activePage&&!activePage.isClosed()){
+    console.log('Trade UI diagnostic',await activePage.evaluate(()=>({url:location.hash,form:document.querySelector('.board-form')?.textContent?.slice(0,1800)})));
+    await activePage.screenshot({path:'tmp/trading-flow-failure.png'});
+  }
+  throw error;
 } finally {await browser.close();}
