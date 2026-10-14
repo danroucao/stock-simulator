@@ -253,7 +253,18 @@ export class MarketStore {
       const configured=(globalThis as typeof globalThis&{__STOCK_APP_CONFIG__?:{tpexProxyUrl?:string}}).__STOCK_APP_CONFIG__?.tpexProxyUrl?.trim();
       const base=(configured||'/api/tpex').replace(/\/$/,'');
       const response=await fetch(`${base}/api/intraday-market`,{cache:'no-store',signal:AbortSignal.timeout(15000)});
-      if(response.status===404){this.intraday.set(null);this.intradayError.set('今日盤中快照尚未產生。');return;}
+      if(response.status===404){
+        this.intraday.set(null);
+        const session=intradaySession();
+        this.intradayError.set(session.state==='closed'
+          ? `${session.date} 盤中快照未產生；目前已收盤，請以收盤行情為準。`
+          : session.state==='preopen'
+            ? '尚未開盤，盤中快照會在交易時段開始產生。'
+            : session.state==='nontrading'
+              ? '今日非一般交易日，不會產生盤中快照。'
+              : '交易時段盤中快照尚未產生，請稍後重試。');
+        return;
+      }
       if(!response.ok)throw new Error(`盤中快照 HTTP ${response.status}`);
       const value=await response.json() as IntradayMarketFeed;
       if(value?.schemaVersion!==1||value.status!=='ready'||!/^\d{4}-\d{2}-\d{2}$/.test(value.quoteDate)||!Number.isFinite(Date.parse(value.generatedAt))||!Array.isArray(value.quotes)||!Array.isArray(value.provisionalEvents)||!value.coverage||

@@ -30,6 +30,15 @@ const taipeiMinutes = (now: Date) => {
   return Number(parts.find((part) => part.type === 'hour')?.value) * 60 +
     Number(parts.find((part) => part.type === 'minute')?.value);
 };
+const taipeiTime = (value: string | null | undefined) => {
+  if (!value || !Number.isFinite(Date.parse(value))) return '尚無紀錄';
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    dateStyle: 'short',
+    timeStyle: 'short',
+    hour12: false,
+  }).format(new Date(value));
+};
 export const shortMarketDate = (value: string | null | undefined) =>
   value ? `${Number(value.slice(5, 7))}／${Number(value.slice(8, 10))}` : '尚未取得';
 
@@ -65,15 +74,15 @@ export function marketUpdateStatus(source: MarketUpdateSource | null, now = new 
     return {
       kind: 'failed',
       headline: '最近一次市場掃描失敗',
-      detail: `${source.message || '未提供失敗原因'}；目前保留 ${shown} 結果。`,
+      detail: `執行狀態：失敗；最後嘗試 ${taipeiTime(source.attemptedAt)}（台北）。${source.message || '未提供失敗原因'}；目前保留 ${shown} 結果。`,
       expectedDate: expected,
     };
   }
   if (expected && source.date < expected) {
     return {
-      kind: 'updating',
-      headline: `${shortMarketDate(expected)} 收盤資料更新中，目前暫顯示 ${shown}`,
-      detail: '官方行情完整後才會產生選股與產業統計；重新讀取只會取得已完成的結果。',
+      kind: 'waiting',
+      headline: `${shortMarketDate(expected)} 收盤資料尚未完成，目前暫顯示 ${shown}`,
+      detail: `執行狀態：尚未取得本交易日完成或失敗紀錄；最後嘗試 ${taipeiTime(source.attemptedAt)}（台北）。等待上市／上櫃官方日線齊全後，才會產生選股與產業統計。`,
       expectedDate: expected,
     };
   }

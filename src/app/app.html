@@ -8,7 +8,7 @@
       @if (closingPosition(); as position) {
         <dialog id="position-close-dialog" class="close-dialog" aria-label="實際平倉確認" (cancel)="$event.preventDefault(); dismissPositionClose()">
           <h3>{{ stockLabel(position.symbol, stockNamesBySymbol()[position.symbol]) }} · {{ position.type }} · {{ closingIsShort() ? '記錄回補' : '記錄平倉' }}</h3>
-          <p class="backtest-note">日期格式：YYYY/MM/DD（日期選擇器依瀏覽器地區顯示）</p>
+          <p class="backtest-note">日期會依裝置與瀏覽器的地區設定顯示。</p>
           <div class="field-grid">
             <label class="field"><span>實際成交日期</span><input [attr.aria-invalid]="!!closingFieldError('date')" [attr.aria-describedby]="closingFieldError('date') ? 'close-date-error' : null" aria-label="實際成交日期" type="date" [min]="position.tradeDate || ''" [max]="todayDate()" [value]="closingDate()" (change)="closingDate.set($any($event.target).value)" />@if (closingFieldError('date')) { <small id="close-date-error" class="error-text" role="alert">{{ closingFieldError('date') }}</small> }</label>
             <label class="field"><span>實際成交價</span><input [attr.aria-invalid]="!!closingFieldError('price')" [attr.aria-describedby]="closingFieldError('price') ? 'close-price-error' : null" aria-label="實際成交價" type="number" min="0.01" step="0.01" [value]="closingPrice()" (input)="closingPrice.set(+$any($event.target).value)" />@if (closingFieldError('price')) { <small id="close-price-error" class="error-text" role="alert">{{ closingFieldError('price') }}</small> }</label>
@@ -220,7 +220,7 @@
           <button type="button" class="chart-range-button" [disabled]="!canUpdateIntraday()" [class.active]="liveEnabled() && canUpdateIntraday()" (click)="toggleLive()" [attr.aria-pressed]="liveEnabled() && canUpdateIntraday()">{{ !canUpdateIntraday() ? intradaySession().label : liveEnabled() ? '停止盤中更新' : '啟用盤中更新' }}</button>
           <label class="field compact chart-date-field">
             <span>查詢日期</span>
-            <small>日期格式：YYYY/MM/DD</small><input type="date" [max]="todayDate()" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
+            <small>日期會依裝置與瀏覽器設定顯示</small><input type="date" [max]="todayDate()" [value]="requestedDate()" (change)="onDateChange($any($event.target).value)" />
           </label>
           <div class="chart-range">
             @for (item of chartRangeOptions; track item) {
@@ -407,7 +407,7 @@
     @if(page()==='trades'){<section class="panel" style="grid-column:1/-1"><ng-container [ngTemplateOutlet]="holdingsPane"/></section>}
     @if(page()==='legacy'||page()==='trades'||stockTab()==='trade'){<article id="strategy-board" class="panel board-panel" [class.collapsed]="collapsedPanels().has('board')">
       <div class="panel-header">
-        <div><h2>{{ stockLabel(stockSymbol(), stockName()) }} 交易規劃</h2>@if(page()==='stock'&&stockTab()==='trade'){<button type="button" [disabled]="isLoadingQuote()" (click)="loadCurrentPrice()">{{isLoadingQuote()?'載入中…':'重新整理行情'}}</button>}</div>
+        <div><h2>{{ stockLabel(stockSymbol(), stockName()) }} 交易規劃</h2>@if(page()==='stock'&&stockTab()==='trade'){<button type="button" class="ghost-button panel-header-refresh" [disabled]="isLoadingQuote()" (click)="loadCurrentPrice()">{{isLoadingQuote()?'載入中…':'重新整理行情'}}</button>}</div>
         <div class="panel-header-actions"><span class="badge">{{ stockSymbol() }} · {{ currentStockPositions().length }} 筆持倉 · {{ currentStockPresetOrders().length }} 筆待成交委託</span><button type="button" class="collapse-button" (click)="togglePanel('board')" [attr.aria-expanded]="!collapsedPanels().has('board')" aria-label="收合交易規劃">⌃</button></div>
       </div>
 
@@ -433,15 +433,14 @@
           @if (orderEntryMode() === 'preset' && presetOrderAction() === 'sell') { <p>賣出委託規劃 <button type="button" class="ghost-button" (click)="changeOrderMode('reduce')">返回減少部位</button></p> }
           <p class="backtest-note">{{ orderEntryMode() === 'holding' ? '記錄已成交的持倉，用於追蹤損益。' : '規劃尚未成交的委託；同一天可以建立多個價位。' }} 本頁操作不會送出券商委託。</p>
           @if (editingPositionId() || editingPresetOrderId()) { <p class="record-status">正在編輯既有記錄 <button type="button" class="ghost-button" (click)="cancelOrderEdit()">取消編輯</button></p> }
-          <div class="field-grid">
+          <div class="order-form-groups">
+          <section class="order-form-section" aria-labelledby="order-content-heading">
+            <h3 id="order-content-heading">委託內容</h3>
+            <div class="field-grid">
             <label class="field">
               <span>股票代號</span>
               <input [attr.aria-invalid]="!!orderFieldError('symbol')" [attr.aria-describedby]="orderFieldError('symbol') ? 'symbol-input-error' : null" type="text" [value]="positionForm().symbol" (input)="onPositionFieldChange('symbol', $any($event.target).value)" />
             @if (orderFieldError('symbol')) { <small id="symbol-input-error" class="error-text" role="alert">{{ orderFieldError('symbol') }}</small> }</label>
-            @if (orderEntryMode() === 'holding') {
-              <label class="field"><span>入倉日期</span><small>日期格式：YYYY/MM/DD</small><input aria-label="入倉日期" type="date" [max]="todayDate()" [attr.aria-invalid]="!!orderFieldError('tradeDate')" [attr.aria-describedby]="orderFieldError('tradeDate') ? 'trade-date-error' : null" [value]="positionForm().tradeDate" (change)="onPositionFieldChange('tradeDate', $any($event.target).value)" />@if (orderFieldError('tradeDate')) { <small id="trade-date-error" class="error-text" role="alert">{{ orderFieldError('tradeDate') }}</small> }</label>
-            }
-
             <label class="field">
               <span>{{ orderEntryMode() === 'preset' ? '交易類型' : '持倉方向' }}</span>
               <select [value]="positionForm().type" (change)="onPositionFieldChange('type', $any($event.target).value)">
@@ -465,27 +464,45 @@
               <span>{{ orderEntryMode() === 'holding' ? '成交價' : '委託價' }}</span>
               <input [attr.aria-invalid]="!!orderFieldError('entryPrice')" [attr.aria-describedby]="orderFieldError('entryPrice') ? 'entryPrice-input-error' : null" type="number" [attr.aria-label]="orderEntryMode() === 'holding' ? '進場價' : '委託價'" [value]="positionForm().entryPrice" min="0.01" step="0.01" (input)="onPositionFieldChange('entryPrice', +$any($event.target).value)" />
             @if (orderFieldError('entryPrice')) { <small id="entryPrice-input-error" class="error-text" role="alert">{{ orderFieldError('entryPrice') }}</small> }</label>
-            @if (orderEntryMode() === 'holding' || presetOrderAction() === 'buy') {
-            <label class="field"><span>停損價（選填）</span><input aria-label="停損價（選填）" [attr.aria-invalid]="orderEntryMode() === 'preset' && pricePlanningError().includes('停損') ? true : null" [attr.aria-describedby]="orderEntryMode() === 'preset' && pricePlanningError().includes('停損') ? 'stopLossPrice-error' : null" type="number" [value]="positionForm().stopLossPrice ?? ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('stopLossPrice', $any($event.target).value ? +$any($event.target).value : undefined)" />@if (orderEntryMode() === 'preset' && pricePlanningError().includes('停損')) { <small id="stopLossPrice-error" class="error-text" role="alert">{{ pricePlanningError() }}</small> }@if (orderFieldError('stopLossPrice')) { <small id="stopLossPrice-input-error" class="error-text" role="alert">{{ orderFieldError('stopLossPrice') }}</small> }</label>
-            }
-            @if (orderEntryMode() === 'preset') {
-              @if (presetOrderAction() === 'buy') {
-              <label class="field"><span>預計出場價（選填）</span><input aria-label="預計出場價（選填）" [attr.aria-invalid]="orderEntryMode() === 'preset' && pricePlanningError().includes('目標') ? true : null" [attr.aria-describedby]="orderEntryMode() === 'preset' && pricePlanningError().includes('目標') ? 'targetPrice-error' : null" type="number" [value]="positionForm().targetPrice || ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 0))" />@if (orderEntryMode() === 'preset' && pricePlanningError().includes('目標')) { <small id="targetPrice-error" class="error-text" role="alert">{{ pricePlanningError() }}</small> }@if (orderFieldError('targetPrice')) { <small id="targetPrice-input-error" class="error-text" role="alert">{{ orderFieldError('targetPrice') }}</small> }</label>
-              }
-              <label class="field"><span>預計交易日</span><input aria-label="預計交易日" type="date" [value]="plannedTradeDate()" (change)="plannedTradeDate.set($any($event.target).value)" /></label>
-              <label class="field"><span>預估持有天數（日曆日）</span><input aria-label="預估持有天數" type="number" min="1" step="1" [value]="estimatedHoldingDays()" (input)="estimatedHoldingDays.set(+$any($event.target).value)" /></label>
-              <label class="field"><span>有效至</span><small>有效至是委託期限，與預估出場日期分開</small><small>日期格式：YYYY/MM/DD</small><input type="date" aria-label="有效至" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
-              <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">日曆依證交所 2026 年開休市表（2026/10/09 核對），不自動包含颱風等臨時停市；仍需核對市場公告。</p></details>
-              @if (calendarCoverageWarning()) { <p class="error-text">此日期範圍含未載入官方日曆的年份，目前僅排除週末，請自行核對有效日。</p> }
-            }
             <label class="field">
               <span>備註</span>
               <input type="text" [value]="positionForm().note" (input)="onPositionFieldChange('note', $any($event.target).value)" />
             </label>
+            </div>
+          </section>
+          <section class="order-form-section" aria-labelledby="order-date-heading">
+            <h3 id="order-date-heading">日期與持有假設</h3>
+            <div class="field-grid">
+              @if (orderEntryMode() === 'holding') {
+                <label class="field"><span>入倉日期</span><small>日期會依裝置與瀏覽器設定顯示</small><input aria-label="入倉日期" type="date" [max]="todayDate()" [attr.aria-invalid]="!!orderFieldError('tradeDate')" [attr.aria-describedby]="orderFieldError('tradeDate') ? 'trade-date-error' : null" [value]="positionForm().tradeDate" (change)="onPositionFieldChange('tradeDate', $any($event.target).value)" />@if (orderFieldError('tradeDate')) { <small id="trade-date-error" class="error-text" role="alert">{{ orderFieldError('tradeDate') }}</small> }</label>
+              }
+              @if (orderEntryMode() === 'preset') {
+                <label class="field"><span>預計交易日</span><small>日期會依裝置與瀏覽器設定顯示</small><input aria-label="預計交易日" type="date" [value]="plannedTradeDate()" (change)="plannedTradeDate.set($any($event.target).value)" /></label>
+                <label class="field"><span>有效至</span><small>委託期限；日期顯示依裝置與瀏覽器設定</small><input type="date" aria-label="有效至" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
+                <label class="field"><span>預估持有天數（日曆日）</span><input aria-label="預估持有天數" type="number" min="1" step="1" [value]="estimatedHoldingDays()" (input)="estimatedHoldingDays.set(+$any($event.target).value)" /></label>
+              }
+            </div>
+            @if (orderEntryMode() === 'preset') {
+              <details class="calculation-notes"><summary>日期計算限制</summary><p class="backtest-note">日曆依證交所 2026 年開休市表（2026/10/09 核對），不自動包含颱風等臨時停市；仍需核對市場公告。</p></details>
+              @if (calendarCoverageWarning()) { <p class="error-text">此日期範圍含未載入官方日曆的年份，目前僅排除週末，請自行核對有效日。</p> }
+            }
+          </section>
+          @if (orderEntryMode() === 'holding' || presetOrderAction() === 'buy') {
+          <section class="order-form-section" aria-labelledby="order-risk-heading">
+            <h3 id="order-risk-heading">停損與目標</h3>
+            <div class="field-grid">
+              <label class="field"><span>停損價（選填）</span><input aria-label="停損價（選填）" [attr.aria-invalid]="orderEntryMode() === 'preset' && pricePlanningError().includes('停損') ? true : null" [attr.aria-describedby]="orderEntryMode() === 'preset' && pricePlanningError().includes('停損') ? 'stopLossPrice-error' : null" type="number" [value]="positionForm().stopLossPrice ?? ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('stopLossPrice', $any($event.target).value ? +$any($event.target).value : undefined)" />@if (orderEntryMode() === 'preset' && pricePlanningError().includes('停損')) { <small id="stopLossPrice-error" class="error-text" role="alert">{{ pricePlanningError() }}</small> }@if (orderFieldError('stopLossPrice')) { <small id="stopLossPrice-input-error" class="error-text" role="alert">{{ orderFieldError('stopLossPrice') }}</small> }</label>
+              @if (orderEntryMode() === 'preset' && presetOrderAction() === 'buy') {
+                <label class="field"><span>預計出場價（選填）</span><input aria-label="預計出場價（選填）" [attr.aria-invalid]="pricePlanningError().includes('目標') ? true : null" [attr.aria-describedby]="pricePlanningError().includes('目標') ? 'targetPrice-error' : null" type="number" [value]="positionForm().targetPrice || ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 0))" />@if (pricePlanningError().includes('目標')) { <small id="targetPrice-error" class="error-text" role="alert">{{ pricePlanningError() }}</small> }@if (orderFieldError('targetPrice')) { <small id="targetPrice-input-error" class="error-text" role="alert">{{ orderFieldError('targetPrice') }}</small> }</label>
+              }
+            </div>
+            <p class="backtest-note">停損與目標用於風險試算；缺少或方向不正確時會禁止送出，但不影響名目委託金額。</p>
+          </section>
+          }
           </div>
           @if (orderEntryMode() === 'preset' && presetOrderAction() === 'buy') { <button type="button" class="ghost-button" [disabled]="positionForm().entryPrice <= 0" (click)="resetDirectionPrices()">依{{ positionForm().type === '空單' || positionForm().type === '融券' ? '空單' : '多單' }}方向重設價格</button> }
           <button type="button" class="ghost-button" (click)="useCurrentMarketPrice()">帶入目前股價</button>
-          <p class="record-status">{{ positionForm().symbol }} · {{ positionForm().type }} · {{ positionForm().shares | number:'1.0-0' }} 股 × {{ positionForm().entryPrice | number:'1.0-2' }} 元 · 金額 {{ orderFormError() ? '無法計算' : (positionForm().shares * positionForm().entryPrice | number:'1.0-0') + ' 元' }}（未含交易成本）</p>
+          <p class="record-status nominal-order">{{ positionForm().symbol }} · {{ positionForm().type }} · {{ positionForm().shares | number:'1.0-0' }} 股 × {{ positionForm().entryPrice | number:'1.0-2' }} 元 · 名目金額 {{ nominalOrderAmount() === null ? '無法計算' : (nominalOrderAmount() | number:'1.0-0') + ' 元' }}（未含交易成本）</p>
           @if (orderFormError() && !orderFieldError('symbol') && !orderFieldError('entryPrice') && !orderFieldError('shares') && !orderFieldError('stopLossPrice') && !orderFieldError('targetPrice')) { <p class="error-text" role="alert">{{ orderFormError() }}</p> }
           @if (orderEntryMode() === 'preset' && presetOrderAction() === 'sell') {
             <p class="record-status">{{ positionForm().type }} 持倉 {{ matchingSellHoldings() }} 股 · 其他有效賣出單 {{ reservedSellShares() }} 股 · 本單可委託 {{ availableSellOrderShares() }} 股</p>
@@ -623,7 +640,7 @@
               <button type="button" class="ghost-button" (click)="startPresetFill(order)">記錄實際成交</button>
               @if (fillOrderId() === order.id) {
                 <div class="field-grid">
-                  <label class="field"><span>實際成交日期</span><small>日期格式：YYYY/MM/DD</small><input type="date" [max]="todayDate()" [value]="fillDate()" (change)="fillDate.set($any($event.target).value)" /></label>
+                  <label class="field"><span>實際成交日期</span><small>日期會依裝置與瀏覽器設定顯示</small><input type="date" [max]="todayDate()" [value]="fillDate()" (change)="fillDate.set($any($event.target).value)" /></label>
                   <label class="field"><span>實際成交價</span><input type="number" min="0.01" step="0.01" [value]="fillPrice()" (input)="fillPrice.set(+$any($event.target).value)" /></label>
                   <label class="field"><span>本次成交股數（最多 {{ order.shares }} 股）</span><input type="number" min="1" [max]="order.shares" step="1" [value]="fillShares()" (input)="fillShares.set(+$any($event.target).value)" /></label>
                 </div>

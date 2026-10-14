@@ -28,8 +28,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   scan:
-    # A newly merged workflow must not enable production publishing by itself.
-    if: github.event_name != 'schedule' || vars.MARKET_SCAN_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:

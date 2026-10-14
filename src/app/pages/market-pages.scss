@@ -97,6 +97,11 @@ fieldset input {
 .filters { display:grid; grid-template-columns:minmax(220px,2fr) minmax(150px,1fr) minmax(160px,1fr); align-items:end; }
 .filters > * { min-width:0; }
 .filters input,.filters select { width:100%; }
+.results-toolbar { display:flex;align-items:end;justify-content:space-between;gap:16px;margin:10px 0 14px; }
+.results-toolbar p { margin:0; }
+.sort-controls { display:flex;align-items:end;gap:8px;flex:0 0 auto; }
+.sort-controls label { display:grid;gap:5px;min-width:150px; }
+.sort-controls select { width:100%; }
 .quick { align-items:stretch; }
 .quick button { border-radius:999px; background:#0f233b; }
 .chips { align-items:center; }
@@ -190,6 +195,9 @@ input[type='checkbox'] {
     width: 100%;
   }
   .filters { display:grid; grid-template-columns:1fr; }
+  .results-toolbar { align-items:stretch;flex-direction:column; }
+  .sort-controls { width:100%; }
+  .sort-controls label { min-width:0;flex:1; }
   input,
   select {
     max-width: 100%;
