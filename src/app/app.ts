@@ -156,6 +156,8 @@ export class App {
       this.routeSelectionKey=key;
       this.conditionEvent.set(this.marketStore.events().find(e=>e.id===tree.queryParams['condition']&&e.symbol===symbol)||null);
       this.alertSelection.set(null);this.alertTradeSource.set(undefined);this.alertChartBasis.set(false);
+      // Bind the draft to the route before a delayed feed arrives or the user starts typing.
+      if(this.positionForm().symbol!==symbol)this.syncOrderFormToStock(symbol,0);
       if(this.stockSymbol()!==symbol){this.stockSymbol.set(symbol);this.stockName.set(symbol);this.alertSelection.set(null);this.loadCurrentPrice();}
       const attach=()=>{
         const now=this.router?.parseUrl(this.router.url).root.children['primary']?.segments;
