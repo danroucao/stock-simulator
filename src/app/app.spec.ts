@@ -7,6 +7,53 @@ import { App } from './app';
 import { StockPriceService } from './stock-price.service';
 
 describe('App', () => {
+  it('uses identical estimates in the form and saved card, persists dates and prevents duplicate submissions', () => {
+    localStorage.clear();
+    const app = TestBed.createComponent(App).componentInstance as any;
+    app.changeOrderMode('preset');
+    app.plannedTradeDate.set('2026-10-15');app.presetExpiryDate.set('2026-10-16');app.estimatedHoldingDays.set(12);
+    app.positionForm.update((f:any)=>({...f,symbol:'2353',entryPrice:100,shares:1000,targetPrice:112,stopLossPrice:95}));
+    const reward=app.proposedOrderReward();expect(reward).not.toBeNull();
+    app.createPresetOrderFromForm();const count=app.presetOrders().length;
+    const order=app.presetOrders().at(-1);expect(app.presetProfit(order)).toBe(reward);
+    expect(order.plannedTradeDate).toBe('2026-10-15');expect(order.estimatedHoldingDays).toBe(12);
+    expect(JSON.parse(localStorage.getItem('stock-simulator-workspace-v1')!).presetOrders.at(-1).plannedTradeDate).toBe('2026-10-15');
+    app.createPresetOrderFromForm();expect(app.presetOrders().length).toBe(count);
+    app.onPositionFieldChange('entryPrice',101);app.createPresetOrderFromForm();expect(app.presetOrders().length).toBe(count+1);
+  });
+  it('returns unknown for invalid form price, quantity, dates and missing risk input', () => {
+    const app=TestBed.createComponent(App).componentInstance as any;app.changeOrderMode('preset');
+    app.positionForm.update((f:any)=>({...f,entryPrice:0,targetPrice:120,stopLossPrice:undefined,shares:1000}));
+    expect(app.proposedOrderReward()).toBeNull();expect(app.proposedOrderRisk()).toBeNull();expect(app.riskPerShare()).toBeNull();
+    app.onPositionFieldChange('entryPrice',100);expect(app.proposedOrderReward()).not.toBeNull();expect(app.proposedRiskRewardRatio()).toBeNull();
+    app.onPositionFieldChange('shares',0);expect(app.proposedOrderReward()).toBeNull();expect(app.riskPerShare()).toBeNull();
+    app.onPositionFieldChange('shares',1000);app.plannedTradeDate.set('2026-10-16');app.presetExpiryDate.set('2026-10-15');
+    expect(app.proposedOrderReward()).toBeNull();expect(app.orderFormError()).toContain('不可晚於');
+  });
+  it('retains an unsaved order and reports storage failure without creating duplicates on retry', () => {
+    localStorage.clear();const app=TestBed.createComponent(App).componentInstance as any;
+    app.changeOrderMode('preset');app.positionForm.update((f:any)=>({...f,entryPrice:100,targetPrice:110,stopLossPrice:95,shares:1000}));
+    const failed=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('quota');});
+    try {app.createPresetOrderFromForm();const count=app.presetOrders().length;expect(app.saveError()).toContain('儲存失敗');
+      expect(app.orderStatus()).toContain('尚未成功儲存');app.createPresetOrderFromForm();expect(app.presetOrders().length).toBe(count);
+    } finally {failed.mockRestore();}
+    app.saveWorkspace();expect(app.saveError()).toBe('');
+  });
+  it('rejects a fill before the planned trading date', () => {
+    const app=TestBed.createComponent(App).componentInstance as any;
+    const order={id:'future-test',symbol:'2353',type:'現股多單',entryPrice:100,shares:1000,validDays:5,createdAt:app.todayDate(),plannedTradeDate:'2099-01-01',expiryDate:'2099-01-02'};
+    app.presetOrders.set([order]);app.startPresetFill(order);app.confirmPresetFill();
+    expect(app.fillMessage()).toContain('預計交易日');expect(app.presetStatus(order)).toBe('尚未到交易日');expect(app.presetOrders()[0].shares).toBe(1000);
+  });
+  it('rejects weekends and known holidays as planned trading dates without silently changing them', () => {
+    const app=TestBed.createComponent(App).componentInstance as any;app.changeOrderMode('preset');
+    app.positionForm.update((f:any)=>({...f,entryPrice:100,targetPrice:110,stopLossPrice:95,shares:1000}));
+    app.presetExpiryDate.set('2026-10-20');
+    for(const date of ['2026-10-17','2026-10-09']) {
+      app.plannedTradeDate.set(date);expect(app.orderFormError()).toContain('休市日');expect(app.plannedTradeDate()).toBe(date);expect(app.proposedOrderReward()).toBeNull();
+    }
+    app.plannedTradeDate.set('2026-10-16');expect(app.orderFormError()).toBe('');
+  });
   it('ignores a delayed chart from a different reminder stock',()=>{
     const app=TestBed.createComponent(App).componentInstance as any;
     app.stockSymbol.set('2353');app.alertSelection.set({stock:{symbol:'2353',name:'宏碁'}});
@@ -127,7 +174,7 @@ describe('App', () => {
     app.removePresetOrder('cancel-history');
     expect(app.presetOrders().length).toBe(0);
     expect(app.archivedPresetOrders().length).toBe(1);
-    expect(app.orderHistory()[0].status).toBe('取消');
+    expect(app.orderHistory()[0].status).toBe('已取消');
     app.saveWorkspace();
     expect(JSON.parse(localStorage.getItem('stock-simulator-workspace-v1')!).archivedPresetOrders.length).toBe(1);
   });

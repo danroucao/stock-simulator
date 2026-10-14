@@ -23,6 +23,7 @@ import {AlertStore} from './services/alert-store';
 import {MarketStore} from './services/market-store';
 import {WorkspaceSession} from './services/workspace-session';
 import {amount,chartChange} from './services/market-presentation';
+import { estimatePlan, plannedDateError, pendingOrderStatus, validDate } from './services/order-planning';
 
 interface CandleBar {
   date: string;
@@ -294,6 +295,7 @@ export class App {
   protected readonly quoteDate = signal('');
   protected displayDate(value: string | undefined | null): string {
     if (!value) return '無資料';
+    if (value.includes('T') && Number.isFinite(Date.parse(value))) value = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date(value));
     const match = /^(\d{3,4})[-/]?(\d{2})[-/]?(\d{2})(?:T.*)?$/.exec(value);
     if (!match) return value;
     const year = Number(match[1]) + (match[1].length === 3 ? 1911 : 0);
@@ -495,6 +497,10 @@ export class App {
   private orderDraftEdited = false;
   private readonly editedPlanningPrices = new Set<string>();
   protected readonly presetOrderAction = signal<PresetOrderAction>('buy');
+  protected readonly plannedTradeDate = signal(this.firstAvailableTradingDate());
+  protected readonly estimatedHoldingDays = signal(5);
+  protected readonly submittingOrder = signal(false);
+  private submittedOrderFingerprint = '';
   protected readonly shareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly simulationShareUnit = signal<'boardLot' | 'oddLot'>('boardLot');
   protected readonly collapsedPanels = signal<Set<string>>(new Set(['future', 'backtest', 'stress']));
@@ -660,8 +666,8 @@ export class App {
   protected readonly presetFills = signal<PresetFill[]>([]);
   protected readonly archivedPresetOrders = signal<Array<PresetOrder & { finalStatus: '已成交' | '取消'; finalizedAt: string }>>([]);
   protected readonly orderHistory = computed(() => [
-    ...this.presetOrders().map(order => ({ ...order, status: this.isPresetExpired(order) ? '過期' : this.presetFills().some(fill => fill.orderId === order.id) ? '部分成交' : '待成交' })),
-    ...this.archivedPresetOrders().map(order => ({ ...order, status: order.finalStatus })),
+    ...this.presetOrders().map(order => ({ ...order, status: this.presetStatus(order) })),
+    ...this.archivedPresetOrders().map(order => ({ ...order, status: order.finalStatus === '取消' ? '已取消' : order.finalStatus })),
   ].filter(order => this.fillHistoryScope() === 'all' || order.symbol === this.stockSymbol()).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   protected readonly hasSamplePositions = computed(() => this.tradePositions().some(position => position.id === 'sample-long' || position.id === 'sample-short'));
   protected readonly confirmRemoveSamples = signal(false);
@@ -677,6 +683,9 @@ export class App {
 
   protected isPresetExpired(order: PresetOrder): boolean {
     return !!order.expiryDate && order.expiryDate < this.todayDate();
+  }
+  protected presetStatus(order: PresetOrder): string {
+    return pendingOrderStatus(order, this.todayDate(), this.presetFills().some(fill => fill.orderId === order.id));
   }
 
   protected startPresetFill(order: PresetOrder): void {
@@ -695,8 +704,8 @@ export class App {
       this.fillMessage.set('請輸入有效成交價與股數；成交股數不可超過剩餘委託股數。'); return;
     }
     const createdDate = order.createdAt.includes('T') ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date(order.createdAt)) : order.createdAt.slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < createdDate || date > this.todayInputValue() || (order.expiryDate && date > order.expiryDate)) {
-      this.fillMessage.set('成交日期須在建立日與有效期限之間，且不可晚於今天。'); return;
+    if (!validDate(date) || date < createdDate || (order.plannedTradeDate && date < order.plannedTradeDate) || date > this.todayInputValue() || (order.expiryDate && date > order.expiryDate)) {
+      this.fillMessage.set('成交日期不可早於建立日或預計交易日，不可超過有效至或今天。'); return;
     }
     const id = `fill-${crypto.randomUUID()}`;
     const undoBefore = this.tradeStateJson();
@@ -741,11 +750,14 @@ export class App {
     if (this.editingPresetOrderId() === order.id) this.editingPresetOrderId.set(null);
     this.fillOrderId.set(null);
     this.fillMessage.set(`已記錄 ${order.symbol} 成交 ${shares} 股，${order.action === 'sell' ? '已更新持倉與已實現損益' : '已轉入持倉'}；剩餘 ${order.shares - shares} 股。`);
+    this.saveWorkspace();
   }
 
   protected copyPresetOrder(order: PresetOrder): void {
     this.editPresetOrder(order);
     this.editingPresetOrderId.set(null);
+    this.plannedTradeDate.set(this.firstAvailableTradingDate());
+    this.onPresetExpiryChange(this.presetDateMax);
     this.orderStatus.set(`已帶入 ${order.symbol} 的待成交委託。請調整委託價後建立新單，原單會保留。`);
   }
   protected readonly orderFormError = computed(() => {
@@ -759,6 +771,13 @@ export class App {
     if (!Number.isInteger(form.shares) || form.shares <= 0) return '股數必須是大於 0 的整數。';
     if (this.shareUnit() === 'boardLot' && form.shares % 1000 !== 0) return '整張股數須為 1000 的倍數，或切換成零股。';
     if (this.shareUnit() === 'oddLot' && form.shares > 999) return '零股請輸入 1～999 股。';
+    if (this.orderEntryMode() === 'preset') {
+      const legacy = this.presetOrders().find(order => order.id === this.editingPresetOrderId() && !order.plannedTradeDate);
+      const error = legacy && !this.plannedTradeDate() ? (validDate(this.presetExpiryDate()) ? '' : '有效至日期無效。') : plannedDateError(this.plannedTradeDate(), this.presetExpiryDate());
+      if (error) return error;
+      if (this.plannedTradeDate() && !isTradingDate(this.plannedTradeDate())) return '預計交易日須排除週末及已知休市日。';
+      if (!Number.isInteger(this.estimatedHoldingDays()) || this.estimatedHoldingDays() < 1) return '預估持有天數須為大於 0 的整數。';
+    }
     if (this.orderEntryMode() !== 'preset' || this.presetOrderAction() !== 'sell') {
       if (form.stopLossPrice !== undefined && (!Number.isFinite(form.stopLossPrice) || form.stopLossPrice <= 0)) return '停損價須大於 0，或留空。';
       if (!Number.isFinite(form.targetPrice) || form.targetPrice < 0) return '預計出場價須大於 0，或留空。';
@@ -813,8 +832,10 @@ export class App {
   }
   protected readonly excelScope = signal<'all' | 'current'>('all');
   protected readonly excelIncludeExpired = signal(false);
+  protected readonly excelTradeDate = signal('');
   protected readonly excelOrders = computed(() => this.presetOrders().filter(order =>
     (this.excelScope() === 'all' || order.symbol === this.stockSymbol()) &&
+    (!this.excelTradeDate() || order.plannedTradeDate === this.excelTradeDate()) &&
     (this.excelIncludeExpired() || !order.expiryDate || order.expiryDate >= this.todayDate()),
   ));
   protected readonly excelPreview = computed(() => {
@@ -833,13 +854,13 @@ export class App {
     const fills = this.visiblePresetFills();
     if (this.exportingExcel() || (historyOnly ? !fills.length : !orders.length)) return;
     const scope = (historyOnly ? this.fillHistoryScope() : this.excelScope()) === 'all' ? '全部股票' : this.stockSymbol();
-    const filterDescription = `${scope}；${this.excelIncludeExpired() ? '包含過期單' : '排除已知過期單'}；判斷日期 ${this.todayDate()}`;
+    const filterDescription = `${scope}；預計交易日 ${this.excelTradeDate() || '不限（含舊單未設定）'}；${this.excelIncludeExpired() ? '包含過期單' : '排除已知過期單'}；判斷日期 ${this.todayDate()}`;
     this.exportingExcel.set(true);
     this.backupStatus.set('');
     try {
       const { buildPresetOrderWorkbook, buildFillHistoryWorkbook } = await import('./services/preset-order-export');
       const names = Object.fromEntries(this.stockRecords().map(record => [record.symbol, record.name]));
-      const book = historyOnly ? await buildFillHistoryWorkbook(fills, names) : await buildPresetOrderWorkbook(orders, names, filterDescription);
+      const book = historyOnly ? await buildFillHistoryWorkbook(fills, names) : await buildPresetOrderWorkbook(orders, names, filterDescription, { calculator: this.portfolioCalculator, discount: this.feeDiscount(), financingRate: this.financingRate(), borrowRate: this.shortBorrowRate(), asOf: this.todayDate(), estimateSell: order => this.presetProfit(order), salePlan: order => this.estimateSale(order, order.entryPrice) });
       const data = await book.xlsx.writeBuffer();
       const url = URL.createObjectURL(new Blob([new Uint8Array(data)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
       const link = document.createElement('a');
@@ -867,7 +888,7 @@ export class App {
   protected readonly presetExpiryDate = signal(this.addBusinessDays(this.firstAvailableTradingDate(), 4));
   protected get presetDateMin(): string { this.todayDate(); return this.firstAvailableTradingDate(); }
   protected get presetDateMax(): string { return this.addBusinessDays(this.presetDateMin, 4); }
-  protected readonly calendarCoverageWarning = computed(() => !hasTradingCalendar(this.presetDateMin) || !hasTradingCalendar(this.presetDateMax));
+  protected readonly calendarCoverageWarning = computed(() => !hasTradingCalendar(this.plannedTradeDate() || this.presetDateMin) || !hasTradingCalendar(this.presetExpiryDate()));
   protected readonly presetOrders = signal<PresetOrder[]>([]);
   protected readonly closedTrades = signal<ClosedTrade[]>([]);
   protected readonly tradePositions = signal<TradePosition[]>([
@@ -1080,9 +1101,10 @@ export class App {
   });
   protected readonly riskPerShare = computed(() => {
     const form = this.positionForm();
-    if (this.pricePlanningError() || this.proposedStopLoss() === undefined) return null;
+    const error = this.orderFormError();
+    if ((error && !/股數|零股|整張/.test(error)) || !Number.isInteger(form.shares) || form.shares <= 0 || this.pricePlanningError() || this.proposedStopLoss() === undefined) return null;
     return Math.max(0, -this.portfolioCalculator.simulateOrder(form.entryPrice, this.proposedStopLoss()!, form.type, 1,
-      this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount()));
+      this.planningDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount()));
   });
   protected readonly suggestedRiskShares = computed(() => {
     const risk = this.riskPerShare();
@@ -1091,26 +1113,24 @@ export class App {
     const credit = editing && editing.action !== 'sell' && !this.isPresetExpired(editing) ? this.portfolioCalculator.entryCapital(editing.entryPrice, editing.type, editing.shares, this.feeDiscount()) : 0;
     const budget = Math.max(this.availableCash() - this.pendingOrderCapital() + credit, 0);
     const form = this.positionForm();
-    const raw = this.portfolioCalculator.sizeByRiskAndCash(form.entryPrice, this.proposedStopLoss()!, form.type, this.maxRiskPerTrade(), budget, this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount());
+    const raw = this.portfolioCalculator.sizeByRiskAndCash(form.entryPrice, this.proposedStopLoss()!, form.type, this.maxRiskPerTrade(), budget, this.planningDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount());
     return this.shareUnit() === 'boardLot' ? Math.floor(raw / 1000) * 1000 : Math.min(raw, 999);
   });
-  protected readonly proposedOrderRisk = computed(() => {
-    const stopLoss = this.proposedStopLoss();
-    return stopLoss === undefined || this.pricePlanningError() ? null : Math.max(0, -this.portfolioCalculator.simulateOrder(
-      this.positionForm().entryPrice, stopLoss, this.positionForm().type, this.positionForm().shares, this.nearTermDays(),
-      this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-    ));
+  protected readonly planningDays = computed(() => this.orderEntryMode() === 'preset' ? this.estimatedHoldingDays() : this.nearTermDays());
+  protected readonly formPlan = computed(() => {
+    if (this.orderFormError() || this.pricePlanningError()) return null;
+    const form = this.positionForm();
+    return this.estimateOrder({ entryPrice: form.entryPrice, exitPrice: form.targetPrice > 0 ? form.targetPrice : undefined,
+      stopLossPrice: form.stopLossPrice, type: form.type, shares: form.shares, validDays: this.planningDays() });
   });
-  protected readonly proposedOrderReward = computed(() => {
-    const targetPrice = this.positionForm().targetPrice;
-    return targetPrice > 0 && !this.pricePlanningError() ? this.portfolioCalculator.simulateOrder(
-      this.positionForm().entryPrice, targetPrice, this.positionForm().type, this.positionForm().shares,
-      this.nearTermDays(), this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
-    ) : null;
-  });  protected readonly proposedRiskRewardRatio = computed(() => {
-    const risk = this.proposedOrderRisk(), reward = this.proposedOrderReward();
-    return risk !== null && risk > 0 && reward !== null ? reward / risk : null;
-  });
+  protected readonly proposedOrderRisk = computed(() => this.formPlan()?.risk ?? null);
+  protected readonly proposedOrderReward = computed(() => this.formPlan()?.reward ?? null);
+  protected readonly proposedRiskRewardRatio = computed(() => this.formPlan()?.ratio ?? null);
+  private estimateOrder(order: Pick<PresetOrder, 'entryPrice' | 'exitPrice' | 'stopLossPrice' | 'type' | 'shares' | 'validDays' | 'estimatedHoldingDays'>) {
+    return estimatePlan({ entry: order.entryPrice, target: order.exitPrice, stop: order.stopLossPrice, shares: order.shares,
+      type: order.type, days: order.estimatedHoldingDays ?? order.validDays, discount: this.feeDiscount(),
+      financingRate: this.financingRate(), borrowRate: this.shortBorrowRate() }, this.portfolioCalculator);
+  }
 
   protected readonly backtestResult = computed<BacktestResult>(() => this.portfolioCalculator.backtest(
     this.history().map((point) => point.close), this.positionForm().type, 100_000,
@@ -1746,6 +1766,9 @@ export class App {
   }
 
   protected editPresetOrder(order: PresetOrder): void {
+    this.submittedOrderFingerprint = '';
+    this.plannedTradeDate.set(order.plannedTradeDate ?? '');
+    this.estimatedHoldingDays.set(order.estimatedHoldingDays ?? order.validDays);
     this.alertTradeSource.set(order.reminderSource);
     this.pendingPresetCancel.set(null);
     this.orderStatus.set(`正在編輯 ${order.symbol} 待成交委託，儲存後更新原單。`);
@@ -1779,6 +1802,7 @@ export class App {
   }
 
   protected onPositionFieldChange<K extends keyof TradePositionInput>(field: K, value: TradePositionInput[K]): void {
+    this.submittedOrderFingerprint = '';
     if (field === 'stopLossPrice' || field === 'targetPrice') this.editedPlanningPrices.add(field);
     this.orderDraftEdited = true;
     this.orderStatus.set('');
@@ -1820,9 +1844,8 @@ export class App {
   }
 
   protected onPresetExpiryChange(value: string): void {
-    const normalized = this.clampPresetDate(value);
-    this.presetExpiryDate.set(normalized);
-    this.nearTermDays.set(this.businessDaysThrough(normalized));
+    this.submittedOrderFingerprint = '';
+    this.presetExpiryDate.set(value);
   }
 
   protected onSimulationShareUnitChange(value: 'boardLot' | 'oddLot'): void {
@@ -1881,7 +1904,7 @@ export class App {
   protected sellPlanProfit(): number | null {
     if (this.orderFormError()) return null;
     const form = this.positionForm();
-    return this.sellHoldingProfit({ ...form, id: 'preview', action: 'sell', validDays: this.nearTermDays(), createdAt: '' }, form.entryPrice);
+    return this.estimateSale({ ...form, id: 'preview', action: 'sell', validDays: this.nearTermDays(), createdAt: '' }, form.entryPrice)?.net ?? null;
   }
 
   protected confirmPositionClose(): void {
@@ -2058,7 +2081,7 @@ export class App {
   }
 
   protected createPresetOrderFromForm(): void {
-    if (this.orderFormError() || this.pricePlanningError()) return;
+    if (this.submittingOrder() || this.storageConflict() || this.orderFormError() || this.pricePlanningError()) return;
     const form = this.positionForm();
     const symbol = form.symbol.trim();
     if (!symbol) return;
@@ -2068,17 +2091,22 @@ export class App {
       ? Math.min(this.normalizedOrderShares(form.shares), this.sellableFormStockShares())
       : this.normalizedOrderShares(form.shares);
     const editingId = this.editingPresetOrderId();
+    const fingerprint = JSON.stringify([form, action, this.shareUnit(), this.plannedTradeDate(), this.presetExpiryDate(), this.estimatedHoldingDays()]);
+    if (fingerprint === this.submittedOrderFingerprint) { this.orderStatus.set('此份表單已建立，請修改條件或使用「複製成另一價位」。'); return; }
+    this.submittingOrder.set(true);
     const updatedOrder: PresetOrder = {
       id: `preset-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       symbol,
       type: form.type,
       action,
       shares,
-      entryPrice: Math.max(form.entryPrice, 1),
+      entryPrice: form.entryPrice,
       exitPrice: form.targetPrice > 0 ? form.targetPrice : undefined,
       validDays: Math.max(this.nearTermDays(), 1),
       createdAt: new Date().toISOString(),
       expiryDate: this.presetExpiryDate(),
+      plannedTradeDate: this.plannedTradeDate() || undefined,
+      estimatedHoldingDays: this.estimatedHoldingDays(),
       shareUnit: this.shareUnit(),
       stopLossPrice: form.stopLossPrice,
       note: form.note.trim(),
@@ -2088,7 +2116,10 @@ export class App {
       ? orders.map((order) => order.id === editingId ? { ...updatedOrder, id: editingId, createdAt: order.createdAt } : order)
       : [...orders, updatedOrder]);
     this.editingPresetOrderId.set(null);
-    this.orderStatus.set(editingId ? '已儲存待成交委託修改。' : `已建立 ${symbol} ${action === 'sell' ? '賣出' : '買進'}待成交委託：${shares} 股 × ${form.entryPrice} 元。可修改價格後建立下一筆。`);
+    this.submittedOrderFingerprint = fingerprint;
+    this.saveWorkspace();
+    this.submittingOrder.set(false);
+    this.orderStatus.set(this.saveError() || this.storageConflict() ? '委託已保留在本頁，尚未成功儲存；請處理儲存錯誤後重試儲存，勿重複建立。' : editingId ? '已儲存待成交委託修改。' : `已建立並儲存 ${symbol} ${action === 'sell' ? '賣出' : '買進'}待成交委託：${shares} 股 × ${form.entryPrice} 元。可修改價格後建立下一筆。`);
   }
 
   protected createPresetOrder(): void {
@@ -2112,14 +2143,13 @@ export class App {
     this.presetOrders.update((orders) => orders.filter((order) => order.id !== id));
     if (this.editingPresetOrderId() === id) this.editingPresetOrderId.set(null);
     this.orderStatus.set('已取消待成交委託。');
+    this.saveWorkspace();
   }
 
-  protected presetProfit(order: PresetOrder): number {
-    if (order.action === 'sell') return this.sellHoldingProfit(order, order.entryPrice);
-    return this.portfolioCalculator.simulateOrder(
-      order.entryPrice, order.exitPrice ?? order.entryPrice, order.type, order.shares, order.validDays,
-      this.financingRate(), this.shortBorrowRate(),
-    );
+  protected presetProfit(order: PresetOrder): number | null {
+    if (!(order.entryPrice > 0) || !Number.isFinite(order.entryPrice) || !Number.isInteger(order.shares) || order.shares <= 0) return null;
+    if (order.action === 'sell') return this.estimateSale(order, order.entryPrice)?.net ?? null;
+    return this.estimateOrder(order)?.reward ?? null;
   }
 
   protected removeTradePosition(id: string): void {
@@ -2404,21 +2434,28 @@ export class App {
   }
 
   private sellHoldingProfit(order: PresetOrder, salePrice: number): number {
+    return this.estimateSale(order, salePrice)?.net ?? 0;
+  }
+  private estimateSale(order: PresetOrder, salePrice: number) {
+    if (!Number.isFinite(salePrice) || salePrice <= 0 || !Number.isInteger(order.shares) || order.shares <= 0) return null;
     const positions = this.tradePositions().filter((position) =>
-      position.symbol === order.symbol && position.type === order.type)
+      position.symbol === order.symbol && position.type === order.type && (!position.tradeDate || position.tradeDate <= this.todayInputValue()))
       .sort((a, b) => (a.tradeDate ?? '').localeCompare(b.tradeDate ?? ''));
     let remainingShares = order.shares;
-    let profit = 0;
+    let gross = 0;
+    const costs = {buyFee:0,sellFee:0,transactionTax:0,financingCost:0,borrowCost:0,total:0};
     for (const position of positions) {
       if (remainingShares <= 0) break;
       const shares = Math.min(position.shares, remainingShares);
-      profit += this.portfolioCalculator.positionProfit(
-        position, salePrice, this.feeDiscount(), this.calendarDaysBetween(position.tradeDate, this.todayInputValue()),
-        this.financingRate(), this.shortBorrowRate(), shares,
+      const item = this.portfolioCalculator.positionExitCosts(
+        position, salePrice, shares, this.calendarDaysBetween(position.tradeDate, this.todayInputValue()),
+        this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
       );
+      for (const key of Object.keys(costs) as Array<keyof typeof costs>) costs[key] += item[key];
+      gross += (position.type === '空單' || position.type === '融券' ? position.entryPrice - salePrice : salePrice - position.entryPrice) * shares;
       remainingShares -= shares;
     }
-    return profit;
+    return remainingShares > 0 ? null : {gross,costs,net:gross-costs.total};
   }
   private buildStockStressScenario(id: string, name: string, assumption: string, shock: number, respectStops: boolean, symbol = this.stockSymbol(), marketPrice = this.valuationPrice()): StressScenario {
     const details: StressScenario['details'] = [];
@@ -2480,10 +2517,10 @@ export class App {
       const exit = this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops);
       details.push({ label: `進場待成交委託 ${order.id} · ${order.type}`, shares: order.shares, entry: order.entryPrice, exit, remaining,
         reason: '假設全部進場；' + (!respectStops ? '跳空按情境價估值' : exit !== scenarioPrice ? (exit === order.stopLossPrice ? '觸發停損' : '觸發目標') : '按情境價估值'),
-        costs: this.portfolioCalculator.tradeCosts(order.entryPrice, exit, order.type, order.shares, order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
-        contribution: this.portfolioCalculator.simulateOrder(order.entryPrice, exit, order.type, order.shares, order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) });
+        costs: this.portfolioCalculator.tradeCosts(order.entryPrice, exit, order.type, order.shares, order.estimatedHoldingDays ?? order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()).total,
+        contribution: this.portfolioCalculator.simulateOrder(order.entryPrice, exit, order.type, order.shares, order.estimatedHoldingDays ?? order.validDays, this.financingRate(), this.shortBorrowRate(), this.feeDiscount()) });
       return total + this.portfolioCalculator.simulateOrder(
-        order.entryPrice, this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops), order.type, order.shares, order.validDays,
+        order.entryPrice, this.scenarioExitPrice(scenarioPrice, order.type, order.stopLossPrice, order.exitPrice, respectStops), order.type, order.shares, order.estimatedHoldingDays ?? order.validDays,
         this.financingRate(), this.shortBorrowRate(), this.feeDiscount(),
       );
     }, 0);

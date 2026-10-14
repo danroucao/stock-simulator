@@ -2,10 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { heatComparison, ClassificationSnapshot } from './market-heat-comparison';
 import { industryHeat } from './market-analysis';
 import { DailyBar, MarketStock } from './market-alerts';
-import { defaultFilter, filterFromQuery, technicalPreset } from './screening';
+import { defaultFilter, filterFromQuery, technicalPreset, matches, sortedRows } from './screening';
+import { AnalysisStock } from './market-analysis';
 import { amount, boundLabel, chartChange } from './market-presentation';
 
 // Isolated synthetic fixtures, never published as market data.
+describe('observation range candidates', () => {
+  const row = {symbol:'2353',name:'isolated',market:'twse',industry:'航運業',date:'2026-10-13',state:'整理中',range:{lower:100,upper:104},metrics:{close:{value:103},distance:{value:1}}} as AnalysisStock;
+  it('excludes a broken lower bound even when within five percent of the upper bound', () => {
+    const filter={...defaultFilter(),state:'區間內',bounds:{distance:{min:0,max:5}}};
+    expect(matches(row,filter)).toBe(true);
+    expect(matches({...row,state:'跌破區間',metrics:{...row.metrics,close:{value:99,reason:null},distance:{value:5,reason:null}}},filter)).toBe(false);
+    expect(filterFromQuery({filter:JSON.stringify(filter)},defaultFilter()).state).toBe('區間內');
+  });
+  it('prioritizes valid range observations when sorting by distance', () => {
+    const broken={...row,symbol:'1111',state:'跌破區間',metrics:{...row.metrics,distance:{value:0,reason:null}}} as AnalysisStock;
+    expect(sortedRows([broken,row],{...defaultFilter(),sort:'distance',descending:false}).map(s=>s.symbol)).toEqual(['2353','1111']);
+  });
+});
 const companies: MarketStock[] = [
   { symbol: '2330', name: '甲', market: 'twse', industry: '半導體', industryCode: '24' },
   { symbol: '6488', name: '乙', market: 'tpex', industry: '半導體', industryCode: '24' },

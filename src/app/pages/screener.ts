@@ -9,7 +9,7 @@ import {
   effect,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { Router, ActivatedRoute, RouterLink } from '@angular/router';
+import { Router, ActivatedRoute, RouterLink, NavigationStart } from '@angular/router';
 import { MarketStore } from '../services/market-store';
 import { AlertStore } from '../services/alert-store';
 import {
@@ -31,6 +31,8 @@ import { ALERT_RULES } from '../services/market-alerts';
   styleUrl: './market-pages.scss',
 })
 export class Screener implements OnDestroy {
+  private destroyed = false;
+  private departing = false;
   private readonly onHide = () => {
     this.store.scroll = window.scrollY;
     this.store.rememberView();
@@ -44,6 +46,19 @@ export class Screener implements OnDestroy {
   readonly name = signal('');
   readonly tracking = signal(false);
   readonly status = signal('');
+  readonly drawerOpen = signal(false);
+  readonly resultFocus = computed(() => {
+    const f = this.filter();
+    return f.consolidation !== 'all' || f.bounds.distance || f.state !== 'all' ? 'range' : f.bounds.volatility ? 'volatility' : f.bounds.deviation ? 'deviation' : 'all';
+  });
+  openFilters(): void {
+    const dialog = document.querySelector<HTMLDialogElement>('app-screener .filter-panel');
+    dialog?.showModal(); this.drawerOpen.set(true);
+  }
+  closeFilters(): void {
+    document.querySelector<HTMLDialogElement>('app-screener .filter-panel')?.close();
+    this.drawerOpen.set(false);
+  }
   readonly amount = amount;
   readonly metricFields: Array<{ key: MetricKey; label: string }> = [
     { key: 'sma5', label: '近 5 日平均價' },
@@ -58,6 +73,22 @@ export class Screener implements OnDestroy {
     { key: 'distance', label: '保存區間上緣' },
   ];
   readonly rows = computed(() => sortedRows(this.store.feed()?.stocks || [], this.filter()));
+  readonly volatilityThresholds = computed(() => {
+    const values = (this.store.feed()?.stocks || []).flatMap(stock => stock.metrics.volatility.value === null ? [] : [stock.metrics.volatility.value]);
+    const round = (value:number|null) => value === null ? null : Number(value.toFixed(2));
+    return {high:round(percentile(values,.75)),low:round(percentile(values,.25))};
+  });
+  presetApplied(kind:string): boolean {
+    const f=this.filter();
+    if(kind==='盤整')return f.consolidation==='yes';
+    if(kind==='接近上緣')return f.state==='區間內'&&f.bounds.distance?.min===0&&f.bounds.distance?.max===5;
+    if(kind==='今日突破'||kind==='今日跌破')return f.state===kind;
+    if(kind==='高波動')return this.volatilityThresholds().high!==null&&f.bounds.volatility?.min===this.volatilityThresholds().high&&f.bounds.volatility?.max===undefined;
+    if(kind==='低波動')return this.volatilityThresholds().low!==null&&f.bounds.volatility?.max===this.volatilityThresholds().low&&f.bounds.volatility?.min===undefined;
+    if(kind==='均線偏高')return f.bounds.deviation?.min===Number(((ALERT_RULES.highRatio-1)*100).toFixed(8));
+    if(kind==='均線偏低')return f.bounds.deviation?.max===Number(((ALERT_RULES.lowRatio-1)*100).toFixed(8));
+    return false;
+  }
   readonly visible = computed(() => this.rows().slice(0, this.store.limit()));
   readonly industries = computed(() =>
     [...new Set(this.store.feed()?.stocks.map((s) => s.industry))].sort(),
@@ -86,6 +117,11 @@ export class Screener implements OnDestroy {
     return labels;
   });
   constructor() {
+    this.router.events.pipe(takeUntilDestroyed()).subscribe(event => {
+      if (event instanceof NavigationStart && event.url.split('?')[0] !== '/screener') {
+        this.onHide(); this.departing = true;
+      }
+    });
     window.addEventListener('pagehide', this.onHide);
     this.route.queryParams.pipe(takeUntilDestroyed()).subscribe((query) => {
       if (this.router.getCurrentNavigation()?.extras.info === 'screen-sync') return;
@@ -93,6 +129,7 @@ export class Screener implements OnDestroy {
       if (JSON.stringify(next) !== JSON.stringify(this.filter())) {
         this.filter.set(next);
         this.store.limit.set(20);
+        this.store.scroll = 0;
       }
     });
     effect(() => {
@@ -106,12 +143,16 @@ export class Screener implements OnDestroy {
           info: 'screen-sync',
         });
     });
-    void this.store.load();
-    afterNextRender(() => window.scrollTo(0, this.store.scroll), { injector: this.injector });
+    void this.store.load().then(() => {
+      if (!this.destroyed) afterNextRender(() => {
+        if (!this.destroyed) window.scrollTo(0, this.store.scroll);
+      }, { injector: this.injector });
+    });
   }
   ngOnDestroy(): void {
+    this.destroyed = true;
     window.removeEventListener('pagehide', this.onHide);
-    this.store.scroll = window.scrollY;
+    if (!this.departing) this.store.scroll = window.scrollY;
     this.store.rememberView();
   }
   update(changes: Partial<ScreenFilter>): void {
@@ -134,6 +175,7 @@ export class Screener implements OnDestroy {
       );
     if (kind === '盤整') f.consolidation = 'yes';
     if (kind === '接近上緣') {
+      f.state = '區間內';
       f.bounds.distance = { min: 0, max: 5 };
       f.sort = 'distance';
       f.descending = false;
@@ -164,6 +206,20 @@ export class Screener implements OnDestroy {
   resetAll(): void {
     this.update(defaultFilter());
     this.status.set('已重設全部條件。');
+  }
+  removeCondition(index: number): void {
+    const f = structuredClone(this.filter());
+    const keys: Array<keyof ScreenFilter | MetricKey> = [];
+    if (f.query) keys.push('query');
+    for (const key of ['market','industry','consolidation','direction','state'] as const) if (f[key] !== 'all') keys.push(key);
+    for (const field of this.fields) if (f.bounds[field.key]) keys.push(field.key);
+    const key = keys[index];
+    if (!key) return;
+    if (key === 'query') f.query = '';
+    else if (['market','industry','consolidation','direction','state'].includes(key)) (f as unknown as Record<string,unknown>)[key] = 'all';
+    else delete f.bounds[key as MetricKey];
+    this.update(f);
+    this.status.set('已移除條件，其他條件保留。');
   }
   save(): void {
     if (!this.name().trim()) {

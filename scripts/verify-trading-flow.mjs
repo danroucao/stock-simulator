@@ -7,7 +7,9 @@ await mkdir('tmp', { recursive: true });
 try {
   const page = await browser.newPage({ viewport: process.argv.includes('--mobile') ? { width: 390, height: 844 } : { width: 1280, height: 900 } });
   const base=process.env.WORKSPACE_TEST_URL||'http://localhost:4200/';
-  const today = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(new Date());
+  // Explicit test clock: a known trading day, independent of runner weekends/holidays.
+  const today = '2026-10-14';
+  await page.clock.setFixedTime('2026-10-14T03:00:00Z');
   await page.route('**/api/tpex/**', route => route.fulfill({json:{msgArray:[{c:'2330',n:'台積電',d:today.replaceAll('-',''),t:'13:30:00',z:'100',y:'99',o:'99',h:'105',l:'95',v:'100'}]}}));
   await page.route('https://www.twse.com.tw/**', route => route.fulfill({json:{title:'2330 台積電',data:Array.from({length:22},(_,i)=>[`115/09/${String(i+1).padStart(2,'0')}`,'100000','10000000','99','105','95','100','1','100','0'])}}));
   await page.goto(base+'#/settings');

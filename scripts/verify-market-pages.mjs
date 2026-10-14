@@ -13,15 +13,23 @@ try{for(const width of [1280,390]){
  const screen=page.locator('app-screener');await screen.locator('tbody tr td strong').first().waitFor();
  assert.equal(await screen.locator('tbody tr').count(),20);
  assert.equal(await page.locator('.portfolio-dashboard').count(),0);
+ if(width<700)await screen.getByRole('button',{name:'篩選與排序',exact:true}).click();
  await screen.getByLabel('搜尋股票',{exact:true}).fill('2353');await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===1);
+ if(width<700)await screen.getByRole('button',{name:'完成篩選',exact:true}).click();
  await screen.getByRole('link',{name:'查看個股',exact:true}).click();await page.waitForURL('**#/stock/2353?from=screener');
  await page.getByRole('heading',{name:/2353.*個股分析/}).waitFor();await page.locator('app-workspace #market-chart svg.stock-chart path.chart-line').waitFor();
  await page.getByRole('link',{name:'返回選股中心',exact:true}).click();await screen.waitFor();
  // The lazy route host can attach before Angular has bound the restored input.
  // Wait for the observable state, not just the component host; a lost filter still times out.
  await page.waitForFunction(()=>document.querySelector('app-screener input')?.value==='2353');
+ if(width<700)await screen.getByRole('button',{name:'篩選與排序',exact:true}).click();
  assert.equal(await screen.getByLabel('搜尋股票',{exact:true}).inputValue(),'2353');
+ if(width<700)await screen.getByRole('button',{name:'完成篩選',exact:true}).click();
  await screen.getByRole('button',{name:'重設全部',exact:true}).click();await screen.getByRole('button',{name:'載入更多 20 檔'}).click();await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===40);
+ await screen.locator('tbody tr').nth(30).scrollIntoViewIfNeeded();const listScroll=await page.evaluate(()=>scrollY);assert.ok(listScroll>300);
+ await screen.locator('tbody tr').nth(30).getByRole('link',{name:'查看個股',exact:true}).click();await page.getByRole('link',{name:'返回選股中心',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===40&&scrollY>300).catch(async error=>{console.log('Return diagnostic',await page.evaluate(()=>({rows:document.querySelectorAll('app-screener tbody tr').length,scroll:scrollY,url:location.hash,saved:sessionStorage.getItem('stock-screener-view-v1')})));throw error;});assert.equal(await screen.locator('tbody tr').count(),40);
+ await page.reload();await page.waitForFunction(()=>document.querySelectorAll('app-screener tbody tr').length===40&&scrollY>300).catch(async error=>{console.log('List restore diagnostic',await page.evaluate(()=>({rows:document.querySelectorAll('app-screener tbody tr').length,scroll:scrollY,saved:sessionStorage.getItem('stock-screener-view-v1')})));throw error;});
  await screen.getByRole('button',{name:'均線偏低',exact:true}).click();await page.waitForTimeout(100);for(const row of await screen.locator('tbody tr').all())assert.ok((await row.textContent()).includes('均線偏離'));
  await screen.getByText('儲存條件與站內追蹤',{exact:true}).click();await screen.getByLabel('條件名稱',{exact:true}).fill('測試條件');await screen.getByLabel('啟用站內事件追蹤',{exact:true}).check();await screen.getByRole('button',{name:'儲存條件',exact:true}).click();await screen.getByRole('button',{name:'套用 測試條件',exact:true}).waitFor();
  await page.reload();await screen.getByText('儲存條件與站內追蹤',{exact:true}).click();await screen.getByRole('button',{name:'套用 測試條件',exact:true}).waitFor();

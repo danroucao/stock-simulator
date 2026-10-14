@@ -75,9 +75,11 @@
       ];
       track kind
     ) {
-      <button (click)="preset(kind)">{{ kind.replace('今日', '最新交易日') }}</button>
+      <button [attr.aria-pressed]="presetApplied(kind)" (click)="preset(kind)">{{ presetApplied(kind) ? '✓ ' : '' }}{{ kind.replace('今日', '最新交易日') }}</button>
     }
   </div>
+  <button class="mobile-filter-button" aria-controls="screen-filters" [attr.aria-expanded]="drawerOpen()" (click)="openFilters()">篩選與排序</button>
+  <dialog id="screen-filters" class="filter-panel" aria-label="選股篩選與排序" (close)="drawerOpen.set(false)"><button class="mobile-filter-button" (click)="closeFilters()">完成篩選</button>
   <div class="filters">
     <label
       >搜尋股票<input
@@ -153,7 +155,7 @@
         >
           <option value="all">不限</option>
           @for (
-            state of ['整理中', '突破待確認', '跌破區間', '回到原區間', '今日突破', '今日跌破'];
+            state of ['區間內', '整理中', '突破待確認', '跌破區間', '回到原區間', '今日突破', '今日跌破'];
             track state
           ) {
             <option [value]="state">{{ state.replace('今日', '最新交易日') }}</option>
@@ -189,17 +191,18 @@
       }
     </div>
   </details>
+  </dialog>
   <p role="status">{{ status() }}</p>
   <div class="chips">
     <strong>已套用：</strong>
-    @for (label of applied(); track label) {
-      <span>{{ label }}</span>
+    @for (label of applied(); track label; let index = $index) {
+      <button class="condition-chip" [attr.aria-label]="'移除 ' + label" (click)="removeCondition(index)">{{ label }} ×</button>
     } @empty {
       <span>全部股票</span>
     }
     <button (click)="resetAll()">重設全部</button>
   </div>
-  <p>{{ rows().length }} 檔符合 · 已顯示 {{ visible().length }} 檔。未知數值不通過數值條件。</p>
+  <p role="status">{{ rows().length }} 檔符合目前篩選 · 已顯示 {{ visible().length }} 檔。盤整判定與篩選結果分開；未知數值不通過數值條件。</p>
   <div class="results">
     <table>
       <thead>
@@ -231,7 +234,7 @@
                 }}</span
               ><small>行情 {{ stock.date }}</small>
             </td>
-            <td>
+            <td><details [open]="resultFocus() === 'range' || resultFocus() === 'all'"><summary>區間與方向</summary>
               <span
                 >盤整
                 {{
@@ -257,6 +260,7 @@
                     : (stock.metrics.trend.value | number: '1.1-1') + '%'
                 }}</span
               ><span>{{ stock.state }}</span>
+              @if (stock.range) { <span>保存區間 {{ stock.range.lower | number:'1.0-2' }}～{{ stock.range.upper | number:'1.0-2' }} 元</span> }
               @if (stock.state === '資料不足' || stock.state === '資料排除') {
                 <small>{{
                   stock.stateReason ||
@@ -268,23 +272,29 @@
               @if (stock.metrics.distance.value !== null) {
                 <small>距上緣 {{ stock.metrics.distance.value | number: '1.1-1' }}%</small>
               }
-            </td>
-            <td>
-              <span
+            </details></td>
+            <td><details [open]="resultFocus() !== 'range'"><summary>波動與均線</summary>
+              <span [hidden]="resultFocus() === 'deviation'"
                 >20 日波動
                 {{
                   stock.metrics.volatility.value === null
                     ? '未知'
                     : (stock.metrics.volatility.value | number: '1.2-2') + '%'
                 }}</span
-              ><span
+              ><span [hidden]="resultFocus() === 'volatility'"
                 >均線偏離
                 {{
                   stock.metrics.deviation.value === null
                     ? '未知'
                     : (stock.metrics.deviation.value | number: '1.1-1') + '%'
                 }}</span
-              ><small>{{ stock.smaDirection }}</small>
+              ><small [hidden]="resultFocus() === 'volatility'">{{ stock.smaDirection }}</small>
+              @if (resultFocus() === 'volatility' || resultFocus() === 'deviation') {
+                <details><summary>其他指標</summary>
+                  @if (resultFocus() === 'volatility') { <p>均線偏離 {{ stock.metrics.deviation.value === null ? '未知' : (stock.metrics.deviation.value | number:'1.1-1') + '%' }} · {{ stock.smaDirection }}</p> }
+                  @else { <p>20 日波動 {{ stock.metrics.volatility.value === null ? '未知' : (stock.metrics.volatility.value | number:'1.2-2') + '%' }}</p> }
+                </details>
+              }
               <details>
                 <summary>均線詳細值</summary>
                 <p>
@@ -304,7 +314,7 @@
                   }}
                 </p>
               </details>
-            </td>
+            </details></td>
             <td>
               <span
                 >45 日平均成交
@@ -356,7 +366,7 @@
           <tr>
             <td colspan="5">
               {{
-                store.loading() ? '正在讀取市場分析…' : '沒有符合條件的股票；可清除條件或放寬範圍。'
+                store.loading() ? '正在讀取市場分析…' : '沒有股票同時符合所有條件。可點上方標籤移除其中一項，或重設全部；不會自動放寬條件。'
               }}
             </td>
           </tr>

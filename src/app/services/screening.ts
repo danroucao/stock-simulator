@@ -31,7 +31,7 @@ export function filterFromQuery(query: Record<string, string>, fallback: ScreenF
         !['all','twse','tpex'].includes(value.market) || typeof value.industry !== 'string' ||
         typeof value.query !== 'string' || !['all','yes','no'].includes(value.consolidation) ||
         !['all','上升','下降','平穩','未知'].includes(value.direction) ||
-        !['all','整理中','突破待確認','跌破區間','回到原區間','今日突破','今日跌破'].includes(value.state) ||
+        !['all','區間內','整理中','突破待確認','跌破區間','回到原區間','今日突破','今日跌破'].includes(value.state) ||
         typeof value.descending !== 'boolean' || !value.bounds || typeof value.bounds!=='object' || Array.isArray(value.bounds) ||
         !['close','change','volume','turnover','width','trend','sma5','sma60','deviation','smaChange','volatility','averageTurnover','zeroDays','distance'].includes(value.sort) ||
         Object.entries(value.bounds).some(([key,b])=>!['width','distance','volatility','deviation','averageTurnover'].includes(key) || !b || typeof b!=='object' || Object.entries(b).some(([side,n])=>!['min','max'].includes(side)||typeof n!=='number'||!Number.isFinite(n)))) return defaultFilter();
@@ -43,6 +43,10 @@ export function filterFromQuery(query: Record<string, string>, fallback: ScreenF
 
 export function technicalPreset(current: ScreenFilter): ScreenFilter {
   return { ...defaultFilter(), query: current.query, market: current.market, industry: current.industry };
+}
+export function inObservationRange(stock: AnalysisStock): boolean {
+  const close = stock.metrics.close.value;
+  return !!stock.range && ['整理中','回到原區間'].includes(stock.state) && close !== null && close >= stock.range.lower && close <= stock.range.upper;
 }
 // Unknown is distinct from false. Known false wins over unknown in an AND predicate.
 export function matches(stock: AnalysisStock, filter: ScreenFilter): boolean | null {
@@ -67,7 +71,9 @@ export function matches(stock: AnalysisStock, filter: ScreenFilter): boolean | n
   }
   if (filter.state !== 'all') {
     if (stock.state === '資料排除' || stock.state === '資料不足') unknown = true;
-    else if (filter.state.startsWith('今日')) {
+    else if (filter.state === '區間內') {
+      if (!inObservationRange(stock)) return false;
+    } else if (filter.state.startsWith('今日')) {
       if (
         stock.eventDate !== stock.date ||
         stock.state !== (filter.state === '今日突破' ? '突破待確認' : '跌破區間')
@@ -93,6 +99,7 @@ export function sortedRows(stocks: AnalysisStock[], filter: ScreenFilter): Analy
   return stocks
     .filter((s) => matches(s, filter) === true)
     .sort((a, b) => {
+      if (filter.sort === 'distance' && inObservationRange(a) !== inObservationRange(b)) return inObservationRange(a) ? -1 : 1;
       const av = a.metrics[filter.sort]?.value,
         bv = b.metrics[filter.sort]?.value;
       if (av === null || av === undefined)

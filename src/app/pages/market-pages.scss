@@ -211,3 +211,22 @@ input[type='checkbox'] {
   }
 }
 .comparison-diagnostics small { display:block;overflow-wrap:anywhere; }
+.filter-panel { display:block; position:static; margin:0; padding:0; border:0; width:100%; max-width:none; color:inherit; background:transparent; }
+.mobile-filter-button { display:none; }
+.condition-chip { border:0; background:#17324d; }
+.condition-chip:hover { background:#264d70; }
+.quick button[aria-pressed='true'] { background:#224e6b; border-color:#7fd1ff; }
+td:nth-child(3),td:nth-child(4) { font-variant-numeric:tabular-nums; }
+.results td:nth-child(3)>details>span,.results td:nth-child(4)>span { text-align:right; }
+.results details { border:0; padding:0; }
+.results summary { cursor:pointer; }
+.quick button:focus-visible,.condition-chip:focus-visible { outline:2px solid #7fd1ff; outline-offset:3px; }
+@media(max-width:700px) {
+  .mobile-filter-button { display:inline-block; }
+  .filter-panel:not([open]) { display:none; }
+  .filter-panel[open] { display:block; position:fixed; inset:0 0 0 auto; height:100dvh; max-height:100dvh; width:min(92vw,420px); max-width:92vw; box-sizing:border-box; margin:0; padding:20px; background:#0c1d31; overflow-y:auto; }
+  .filter-panel::backdrop { background:#0009; }
+  .filter-panel .filters { margin-top:18px; }
+  .filter-panel input,.filter-panel select { box-sizing:border-box; width:100%; }
+  .results tr { border:0; background:#10233b; }
+}

@@ -7,7 +7,7 @@ import { routes } from './app.routes';
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideRouter(routes,withHashLocation(),withInMemoryScrolling({scrollPositionRestoration:'enabled'})),
+    provideRouter(routes,withHashLocation(),withInMemoryScrolling({scrollPositionRestoration:'disabled'})),
     provideHttpClient(),
   ],
 };

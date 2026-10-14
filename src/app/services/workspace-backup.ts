@@ -42,6 +42,8 @@ export function validateWorkspaceBackup(raw: string): Record<string, any> {
       for (const field of ['targetPrice', 'stopLossPrice', 'exitPrice']) if (row[field] !== undefined && (!number(row[field]) || row[field] < 0)) throw new Error('價格欄位格式不正確。');
       if (row.note !== undefined && typeof row.note !== 'string') throw new Error('備註格式不正確。');
       if (row.tradeDate !== undefined && !date(row.tradeDate)) throw new Error('持倉日期格式不正確。');
+      if (row.plannedTradeDate !== undefined && (!date(row.plannedTradeDate) || (row.expiryDate && row.plannedTradeDate > row.expiryDate))) throw new Error('預計交易日須有效且不可晚於有效至。');
+      if (row.estimatedHoldingDays !== undefined && (!Number.isInteger(row.estimatedHoldingDays) || row.estimatedHoldingDays < 1)) throw new Error('預估持有天數須為正整數。');
       if (key === 'presetOrders' && (!Number.isFinite(Date.parse(row.createdAt)) || !number(row.validDays) || row.validDays <= 0 || (row.expiryDate && !date(row.expiryDate)) || (row.action && !['buy', 'sell'].includes(row.action)))) throw new Error('預設單日期或方向格式不正確。');
       if (key === 'closedTrades' && (!number(row.exitPrice) || row.exitPrice <= 0 || !number(row.realizedProfit) || !date(row.exitDate))) throw new Error('平倉紀錄格式不正確。');
       if (key === 'closedTrades' && row.tradeDate && row.exitDate < row.tradeDate) throw new Error('平倉日期不可早於入倉日期。');
@@ -84,6 +86,8 @@ export function validateWorkspaceBackup(raw: string): Record<string, any> {
   if (!Array.isArray(saved.archivedPresetOrders)) throw new Error('委託歷史格式不正確。');
   const archivedIds = new Set();
   for (const row of saved.archivedPresetOrders) {
+    if (row?.plannedTradeDate !== undefined && (!date(row.plannedTradeDate) || (row.expiryDate && row.plannedTradeDate > row.expiryDate))) throw new Error('委託歷史預計交易日不正確。');
+    if (row?.estimatedHoldingDays !== undefined && (!Number.isInteger(row.estimatedHoldingDays) || row.estimatedHoldingDays < 1)) throw new Error('委託歷史預估天數不正確。');
     if (!row || typeof row.id !== 'string' || archivedIds.has(row.id) || !/^\d{4,6}$/.test(row.symbol) || !types.includes(row.type) || !['已成交', '取消'].includes(row.finalStatus) || !number(row.entryPrice) || row.entryPrice <= 0 || !Number.isInteger(row.shares) || row.shares < 0 || !Number.isFinite(Date.parse(row.finalizedAt)) || !Number.isFinite(Date.parse(row.createdAt))) throw new Error('委託歷史內容不正確。');
     archivedIds.add(row.id);
   }
