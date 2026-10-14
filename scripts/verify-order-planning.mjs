@@ -17,6 +17,8 @@ try {for(const width of [1280,390]) {
  page.on('pageerror',e=>errors.push(e.message));await page.route('https://www.twse.com.tw/**',r=>r.abort());await page.route('**/api/**',r=>r.abort());
  await page.goto(base+'#/stock/2353?tab=trade');await page.getByRole('tab',{name:'交易規劃',exact:true}).click();
  await page.getByRole('button',{name:'建立部位',exact:true}).click();const form=page.locator('.board-form');
+ for(const heading of ['委託內容','日期與持有假設','停損與目標'])assert.equal(await form.getByRole('heading',{name:heading,exact:true}).count(),1);
+ assert.ok(!(await form.textContent()).includes('YYYY/MM/DD'));
  assert.equal(await form.getByLabel('股票代號',{exact:true}).inputValue(),'2353');
  const waitResult=(label,unknown)=>page.waitForFunction(({label,unknown})=>{
    const value=[...document.querySelectorAll('.order-risk-card > div')].find(el=>el.querySelector('span')?.textContent===label)?.querySelector('strong')?.textContent.trim();
@@ -31,6 +33,9 @@ try {for(const width of [1280,390]) {
  assert.ok((await form.locator('.order-risk-card > div').filter({hasText:'風險報酬比'}).textContent()).includes('無法計算'));
  await form.getByLabel('股數',{exact:true}).fill('0');await waitResult('目標預估淨損益',true);assert.ok((await reward.textContent()).includes('無法計算'));
  await form.getByLabel('股數',{exact:true}).fill('1000');await form.getByLabel('停損價（選填）',{exact:true}).fill('95');
+ await form.getByLabel('預計交易日',{exact:true}).fill('2026-10-16');await form.getByLabel('有效至',{exact:true}).fill('2026-10-15');
+ assert.ok((await form.locator('.nominal-order').textContent()).includes('100,000 元'),'date errors must not hide independently calculable nominal amount');
+ assert.ok(await form.getByRole('button',{name:'建立買進委託',exact:true}).isDisabled(),'invalid date order must remain blocked');
  await form.getByLabel('預計交易日',{exact:true}).fill(today);await form.getByLabel('有效至',{exact:true}).fill(today);await form.getByLabel('預估持有天數',{exact:true}).fill('12');
  await waitResult('目標預估淨損益',false);
  releaseFeed();await page.locator('#strategy-board h2').filter({hasText:'宏碁'}).waitFor();

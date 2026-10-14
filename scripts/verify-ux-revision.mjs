@@ -16,6 +16,7 @@ try{for(const width of [1280,390]){
  await market.getByRole('button',{name:'展開全部產業',exact:true}).click();await page.waitForFunction(n=>document.querySelectorAll('app-market .heat-row').length===n,feed.industryHeat.length);assert.equal(await market.locator('.heat-row').count(),feed.industryHeat.length);
  await market.getByRole('button',{name:'收合為前 10 大',exact:true}).click();await market.getByLabel('搜尋產業',{exact:true}).fill('航運');await page.waitForFunction(()=>document.querySelectorAll('app-market tbody tr').length===1);
  await market.locator('tbody tr').getByRole('link',{name:'航運業',exact:true}).click();const screen=page.locator('app-screener');await screen.getByLabel('產業',{exact:true}).waitFor({state:'attached'});
+ assert.equal(await screen.locator('.results-toolbar').getByLabel('排序',{exact:true}).count(),1);assert.equal(await screen.locator('.filter-panel>.filters').getByLabel('排序',{exact:true}).count(),0);
  if(width<700){await screen.getByRole('button',{name:'篩選與排序',exact:true}).click();assert.ok(await page.evaluate(()=>!!document.activeElement?.closest('app-screener .filter-panel')));await page.screenshot({path:'tmp/screener-drawer-390.png'});}
  await screen.getByLabel('市場',{exact:true}).selectOption('twse');if(width<700)await screen.getByRole('button',{name:'完成篩選',exact:true}).click();await screen.getByRole('button',{name:'高波動',exact:true}).click();
  await page.waitForFunction(()=>{const q=new URLSearchParams(location.hash.split('?')[1]);try{return JSON.parse(q.get('filter')).bounds.volatility.min!==undefined;}catch{return false;}});

@@ -796,6 +796,12 @@ export class App {
     }
     return '';
   });
+  protected readonly nominalOrderAmount = computed(() => {
+    const { entryPrice, shares } = this.positionForm();
+    return Number.isFinite(entryPrice) && entryPrice > 0 && Number.isInteger(shares) && shares > 0
+      ? entryPrice * shares
+      : null;
+  });
 
   protected orderFieldError(field: 'symbol' | 'entryPrice' | 'shares' | 'stopLossPrice' | 'targetPrice' | 'tradeDate'): string {
     const error = this.orderFormError();

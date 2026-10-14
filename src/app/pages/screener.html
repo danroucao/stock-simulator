@@ -102,30 +102,7 @@
           </option>
         }
       </select></label
-    ><label
-      >排序<select
-        aria-label="排序"
-        [value]="filter().sort"
-        (change)="update({ sort: $any($event.target).value })"
-      >
-        @for (
-          field of [
-            { key: 'turnover', label: '成交金額' },
-            { key: 'distance', label: '距上緣' },
-            { key: 'volatility', label: '波動率' },
-            { key: 'deviation', label: '均線偏離' },
-          ];
-          track field.key
-        ) {
-          <option [value]="field.key">{{ field.label }}</option>
-        }
-      </select></label
-    ><button
-      [attr.aria-pressed]="filter().descending"
-      (click)="update({ descending: !filter().descending })"
     >
-      {{ filter().descending ? '由高到低' : '由低到高' }}
-    </button>
   </div>
   <details class="custom">
     <summary>自訂條件（全部以 AND 組合）</summary>
@@ -195,7 +172,17 @@
     }
     <button (click)="resetAll()">重設全部</button>
   </div>
-  <p role="status">{{ rows().length }} 檔符合目前篩選 · 已顯示 {{ visible().length }} 檔。盤整判定與篩選結果分開；未知數值不通過數值條件。</p>
+  <div class="results-toolbar">
+    <p role="status">{{ rows().length }} 檔符合目前篩選 · 已顯示 {{ visible().length }} 檔。盤整判定與篩選結果分開；未知數值不通過數值條件。</p>
+    <div class="sort-controls">
+      <label>排序<select aria-label="排序" [value]="filter().sort" (change)="update({ sort: $any($event.target).value })">
+        @for (field of [{ key: 'turnover', label: '成交金額' },{ key: 'distance', label: '距上緣' },{ key: 'volatility', label: '波動率' },{ key: 'deviation', label: '均線偏離' }]; track field.key) {
+          <option [value]="field.key">{{ field.label }}</option>
+        }
+      </select></label>
+      <button type="button" [attr.aria-pressed]="filter().descending" (click)="update({ descending: !filter().descending })">{{ filter().descending ? '由高到低' : '由低到高' }}</button>
+    </div>
+  </div>
   <div class="results">
     <table>
       <thead>

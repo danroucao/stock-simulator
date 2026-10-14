@@ -28,7 +28,7 @@
 3. 既有 Pages workflow 仍需 repository variable `TPEX_PROXY_URL`、Pages environment 與發布權限。
 4. 檢查資料授權是否允許公開發布衍生結果／最近 100 日還原走勢；若不允許，應改用受保護後端。這項是部署前的實際資料使用限制，程式不會代為申購會員。
 5. 第一次啟用手動執行 `Scan Taiwan ordinary stocks after close`，保留 `publish=false`（預設），先檢查 Actions Summary 的成功狀態、交易日、涵蓋數與排除數。驗證模式不 commit、不部署，產生的 JSON 僅留在暫時 runner，不公開上傳行情檔案。這次開發沒有觸發遠端 workflow、上傳密鑰或發布網站。
-6. 取得正式發布授權後，才使用 `publish=true`，並將 repository variable `MARKET_SCAN_PUBLISH_ENABLED` 設為字串 `true` 啟用每日排程。未設定該變數時定時工作會跳過；手動驗證仍可執行。注意：既有 Pages workflow 會在推送 main／master 時部署，驗證模式不會阻止另一個 workflow 的這項行為。
+6. 取得正式發布授權後，手動掃描可使用 `publish=true` 寫回結果並 dispatch Pages；每日排程已由工作流程直接啟用，不需要 repository variable。注意：既有 Pages workflow 會在推送 main／master 時部署，驗證模式不會阻止另一個 workflow 的這項行為。
 7. 掃描程式、規則或工作流程推送到 main 時也會自動執行只驗證模式，讀取 GitHub Secret，檢查真實 API，但不寫回市場結果或觸發第二次 Pages 部署。
 
 ## 排程與持久化
