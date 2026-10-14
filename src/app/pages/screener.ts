@@ -148,6 +148,7 @@ export class Screener implements OnDestroy {
         if (!this.destroyed) window.scrollTo(0, this.store.scroll);
       }, { injector: this.injector });
     });
+    void this.store.loadIntraday();
   }
   ngOnDestroy(): void {
     this.destroyed = true;

@@ -5,13 +5,14 @@ on:
     paths:
       - '.github/workflows/scan-market.yml'
       - 'scripts/scan-market.mjs'
+      - 'scripts/run-market-scan-with-retry.mjs'
       - 'scripts/official-market-data.mjs'
       - 'scripts/alert-delivery.mjs'
       - 'src/app/services/market-alerts.ts'
       - 'src/app/services/market-analysis.ts'
       - 'src/app/services/market-heat-comparison.ts'
   schedule:
-    - cron: '20 11,12,13 * * 1-5' # 19:20, 20:20, 21:20 Asia/Taipei; retry delayed sources/scheduling
+    - cron: '40 7,8,9 * * 1-5' # 15:40, 16:40, 17:40 Asia/Taipei; later runs cover delayed upstream publication
   workflow_dispatch:
     inputs:
       publish:
@@ -30,7 +31,7 @@ jobs:
     # A newly merged workflow must not enable production publishing by itself.
     if: github.event_name != 'schedule' || vars.MARKET_SCAN_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -55,7 +56,9 @@ jobs:
         env:
           FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
           MARKET_DATA_PROVIDER: ${{ vars.MARKET_DATA_PROVIDER || 'official' }}
-        run: node scripts/scan-market.mjs
+          MARKET_SCAN_ATTEMPTS: 3
+          MARKET_SCAN_RETRY_DELAY_MS: 480000
+        run: node scripts/run-market-scan-with-retry.mjs
       - name: Save validated raw-price cache (including completed downloads from a failed scan)
         if: always()
         uses: actions/cache/save@v5

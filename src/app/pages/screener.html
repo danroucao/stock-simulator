@@ -12,21 +12,14 @@
     <p class="notice" role="alert">{{ store.error() }}</p>
   }
   @if (store.feed(); as feed) {
-    @if (store.freshness()) {
-      <p class="notice" role="status">{{ store.freshness() }}</p>
-    }
+    <div class="market-update" [class.failed]="store.updateStatus().kind === 'failed'" role="status"><strong>{{ store.updateStatus().headline }}</strong>@if (store.updateStatus().detail) { <span>{{ store.updateStatus().detail }}</span> }</div>
+    @if(store.intraday()){<div class="intraday-line" role="status"><strong>盤中行情</strong><span>{{store.intradayFreshness()}}</span><button type="button" (click)="store.loadIntraday()" [disabled]="store.intradayLoading()">更新共享快照</button></div>}
     <p class="status-line">
-      行情 {{ feed.date }} · 掃描 {{ store.time(feed.scannedAt) }}（台北） · 已檢查
+      選股掃描行情日 {{ feed.date }} · 上次成功掃描 {{ store.time(feed.scannedAt) }}（台北） · 已檢查
       {{ feed.coverage.checked }}／{{ feed.coverage.total }} 檔｜完整可分析
       {{ feed.coverage.complete }} 檔｜部分可分析 {{ feed.coverage.partial }} 檔｜無可用分析
       {{ feed.coverage.none }} 檔
     </p>
-    @if (feed.status === 'error') {
-      <p class="notice" role="alert">最近掃描失敗，保留原資料日期：{{ feed.message }}</p>
-    }
-    @if (feed.dataDelay) {
-      <p class="notice">{{ feed.dataDelay }}</p>
-    }
     <details>
       <summary>資料範圍與可用性定義</summary>
       <p>
@@ -233,6 +226,7 @@
                     : (stock.metrics.change.value | number: '1.2-2') + '%'
                 }}</span
               ><small>行情 {{ stock.date }}</small>
+              @if(store.intradayBySymbol().get(stock.symbol);as quote){<small class="intraday-price">盤中 {{quote.close|number:'1.0-2'}} 元・{{quote.time||'時間未提供'}}（延遲快照）</small>}
             </td>
             <td><details [open]="resultFocus() === 'range' || resultFocus() === 'all'"><summary>區間與方向</summary>
               <span

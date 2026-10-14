@@ -1,3 +1,5 @@
+import { SNAPSHOT_KEY, buildIntradaySnapshot, fetchMis, inTaipeiTradingWindow, parseSymbols } from './intraday.js';
+
 const ALLOWED_ORIGINS = new Set([
   'https://danroucao.github.io',
   'http://localhost:4200',
@@ -6,6 +8,9 @@ const ALLOWED_ORIGINS = new Set([
 const ALLOWED_PATHS = new Set([
   '/api/history',
   '/api/quote',
+  '/api/quotes',
+  '/api/intraday-market',
+  '/api/stock-info',
   '/openapi/v1/tpex_mainboard_daily_close_quotes',
   '/www/zh-tw/afterTrading/tradingStock',
 ]);
@@ -21,7 +26,7 @@ function corsHeaders(origin) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const requestUrl = new URL(request.url);
     const origin = request.headers.get('Origin') || '';
 
@@ -35,6 +40,21 @@ export default {
     if (!ALLOWED_PATHS.has(requestUrl.pathname)) return new Response('Path not allowed', { status: 404 });
 
     try {
+      if (requestUrl.pathname === '/api/intraday-market') {
+        if (!env?.INTRADAY) return Response.json({error:'盤中全市場快照尚未設定'},{status:503,headers:origin?corsHeaders(origin):{}});
+        const snapshot=await env.INTRADAY.get(SNAPSHOT_KEY,{type:'json',cacheTtl:30});
+        const headers=new Headers({'Cache-Control':'public, max-age=20'});
+        if(origin)for(const [key,value] of Object.entries(corsHeaders(origin)))headers.set(key,value);
+        return Response.json(snapshot||{error:'今日盤中快照尚未產生'},{status:snapshot?200:404,headers});
+      }
+      if (requestUrl.pathname === '/api/stock-info') {
+        const infoUrl=new URL('https://api.finmindtrade.com/api/v4/data');
+        infoUrl.searchParams.set('dataset','TaiwanStockInfo');
+        const upstream=await fetch(infoUrl,{headers:{Accept:'application/json',...(env?.FINMIND_API_TOKEN?{Authorization:`Bearer ${env.FINMIND_API_TOKEN}`}:{})},signal:AbortSignal.timeout(10000)});
+        const headers=new Headers({'Content-Type':'application/json; charset=utf-8','Cache-Control':'public, max-age=86400'});
+        if(origin)for(const [key,value] of Object.entries(corsHeaders(origin)))headers.set(key,value);
+        return new Response(upstream.body,{status:upstream.status,headers});
+      }
       if (requestUrl.pathname === '/api/history') {
         const symbol = (requestUrl.searchParams.get('symbol') || '').replace(/\D/g, '');
         const startDate = requestUrl.searchParams.get('start_date') || '';
@@ -66,18 +86,17 @@ export default {
         return new Response(historyResponse.body, { status: historyResponse.status, headers });
       }
 
-      if (requestUrl.pathname === '/api/quote') {
-        const symbol = (requestUrl.searchParams.get('symbol') || '').replace(/\D/g, '');
-        if (!/^\d{4,6}$/.test(symbol)) return new Response('Invalid symbol', { status: 400 });
-
-        const misUrl = new URL('https://mis.twse.com.tw/stock/api/getStockInfo.jsp');
-        misUrl.searchParams.set('ex_ch', `tse_${symbol}.tw|otc_${symbol}.tw`);
-        misUrl.searchParams.set('json', '1');
-        misUrl.searchParams.set('delay', '0');
-        const misResponse = await fetch(misUrl.toString(), {
-          headers: { Accept: 'application/json, text/plain, */*' },
-          signal: AbortSignal.timeout(10000),
-        });
+      if (requestUrl.pathname === '/api/quote' || requestUrl.pathname === '/api/quotes') {
+        const symbols=parseSymbols(requestUrl.pathname==='/api/quote'?requestUrl.searchParams.get('symbol'):requestUrl.searchParams.get('symbols')).sort();
+        const cache=globalThis.caches?.default,cacheKey=new Request(`https://intraday-quotes.internal/?symbols=${symbols.join(',')}`);
+        const cached=cache?await cache.match(cacheKey):null;
+        let payload;
+        if(cached)payload=await cached.json();
+        else{
+          const rows=await fetchMis(symbols.map((symbol)=>({symbol})));
+          payload={msgArray:rows,requestedAt:new Date().toISOString()};
+          if(cache)ctx?.waitUntil(cache.put(cacheKey,Response.json(payload,{headers:{'Cache-Control':'public, max-age=15'}})));
+        }
         const headers = new Headers({
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -85,7 +104,7 @@ export default {
         if (origin) {
           for (const [key, value] of Object.entries(corsHeaders(origin))) headers.set(key, value);
         }
-        return new Response(misResponse.body, { status: misResponse.status, headers });
+        return Response.json(payload,{status:200,headers});
       }
 
       const upstreamUrl = new URL(`https://www.tpex.org.tw${requestUrl.pathname}`);
@@ -125,5 +144,10 @@ export default {
       const message = error instanceof Error ? error.message : String(error);
       return new Response(`TPEx upstream request failed: ${message}`, { status: 502 });
     }
+  },
+  async scheduled(controller,env,ctx){
+    const now=new Date(controller.scheduledTime||Date.now());
+    if(!inTaipeiTradingWindow(now)){console.log(JSON.stringify({event:'intraday_snapshot_skipped',reason:'outside_trading_window',at:now.toISOString()}));return;}
+    ctx.waitUntil(buildIntradaySnapshot(env,now));
   },
 };

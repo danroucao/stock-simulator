@@ -58,9 +58,10 @@ try {
   universe = new Map([...parseCompanyRegistry(listed,'twse'),...parseCompanyRegistry(otc,'tpex')]);
   if (universe.size < 1000) throw new Error('無法解析完整普通股名冊');
   const taipeiDate = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(new Date());
-  const taipeiHour = Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',hour:'2-digit',hourCycle:'h23'}).format(new Date()));
+  const taipeiParts = new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+  const taipeiMinutes = Number(taipeiParts.find(part=>part.type==='hour').value)*60+Number(taipeiParts.find(part=>part.type==='minute').value);
   console.log('取得 FinMind 交易日曆');
-  sessions = [...new Set((await finmind('TaiwanStockTradingDate')).map(r=>r.date))].filter(d => d < taipeiDate || d === taipeiDate && taipeiHour >= 19).sort().slice(-100);
+  sessions = [...new Set((await finmind('TaiwanStockTradingDate')).map(r=>r.date))].filter(d => d < taipeiDate || d === taipeiDate && taipeiMinutes >= 15*60+30).sort().slice(-100);
   if (sessions.length < 100) throw new Error('交易日曆不足 100 日');
   const expectedMarketDate = sessions.at(-1);
   all = new Map([...universe.keys()].map(s=>[s,[]]));
@@ -129,7 +130,8 @@ try {
   console.log(`掃描完成：${universe.size} 檔普通股、${newEvents.length} 個事件，行情 ${expectedMarketDate}，${requestCount} 次請求`);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  await writeAlertDelivery(output,{...previous,status:previous.scannedAt ? 'error' : 'unconfigured',attemptedAt,message});
-  if(previousMarket)await atomic('public/market/latest.json',{...previousMarket,status:'error',message});
+  const expectedDate=error && typeof error==='object' && 'expectedMarketDate' in error ? error.expectedMarketDate : previous.expectedMarketDate;
+  await writeAlertDelivery(output,{...previous,status:previous.scannedAt ? 'error' : 'unconfigured',attemptedAt,message,...(expectedDate?{expectedMarketDate:expectedDate}:{})});
+  if(previousMarket)await atomic('public/market/latest.json',{...previousMarket,status:'error',attemptedAt,message,...(expectedDate?{expectedDate}:{})});
   console.error(message); process.exitCode = 1;
 }

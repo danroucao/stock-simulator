@@ -1,7 +1,9 @@
-import { Injectable, signal,computed } from '@angular/core';
-import {alertFreshness} from './alert-store';
-import type {AlertFeed} from './market-alerts';
-import type { MarketAnalysisFeed, MetricKey } from './market-analysis';
+import { DestroyRef, Injectable, Optional, computed, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { timer } from 'rxjs';
+import { marketUpdateStatus } from './market-update-status';
+import {intradaySession} from './intraday-session';
+import type { IntradayMarketFeed, MarketAnalysisFeed, MetricKey } from './market-analysis';
 import {
   SavedScreen,
   ScreenEvent,
@@ -81,7 +83,8 @@ function restore<T>(key: string, fallback: T): T {
 }
 @Injectable({ providedIn: 'root' })
 export class MarketStore {
- readonly freshness=computed(()=>{const feed=this.feed();return feed?alertFreshness({marketDate:feed.date,calendarYears:feed.calendarYears,closedDates:feed.closedDates} as AlertFeed):'';});
+  private readonly intradayClock = signal(Date.now());
+ readonly updateStatus=computed(()=>{const feed=this.feed();return marketUpdateStatus(feed?{date:feed.date,scannedAt:feed.scannedAt,status:feed.status,attemptedAt:feed.attemptedAt,expectedDate:feed.expectedDate,message:feed.message,calendarYears:feed.calendarYears,closedDates:feed.closedDates}:null);});
   readonly importPreview = signal<{ saved: SavedScreen[]; events: ScreenEvent[] } | null>(null);
   exportConditions(): void {
     const blob = new Blob(
@@ -157,6 +160,16 @@ export class MarketStore {
   readonly feed = signal<MarketAnalysisFeed | null>(null);
   readonly loading = signal(false);
   readonly error = signal('');
+  readonly intraday = signal<IntradayMarketFeed|null>(null);
+  readonly intradayLoading=signal(false);
+  readonly intradayError=signal('');
+  readonly intradayUsable=computed(()=>{const feed=this.intraday(),session=intradaySession(new Date(this.intradayClock()));return !!feed&&session.state==='open'&&feed.quoteDate===session.date&&this.intradayClock()-Date.parse(feed.generatedAt)<=10*60*1000;});
+  readonly intradayBySymbol=computed(()=>new Map(((this.intradayUsable()?this.intraday()?.quotes:[])||[]).map(quote=>[quote.symbol,quote])));
+  readonly intradayFreshness=computed(()=>{
+    const feed=this.intraday();if(!feed)return '';
+    const age=this.intradayClock()-Date.parse(feed.generatedAt);
+    return age>10*60*1000?'盤中快照已超過 10 分鐘，請依行情時間判讀。':`盤中快照 ${this.time(feed.generatedAt)}（台北）・${feed.coverage.valid}／${feed.coverage.total} 檔`;
+  });
   readonly filter = signal<ScreenFilter>(defaultFilter());
   readonly limit = signal(20);
   scroll = 0;
@@ -171,7 +184,12 @@ export class MarketStore {
     restore<ScreenEvent[]>('stock-screen-events-v1', []).filter((e) => e?.id && e.snapshot),
   );
   private cacheReady: Promise<void> = Promise.resolve();
-  constructor() {
+  constructor(@Optional() destroyRef?: DestroyRef) {
+    if(destroyRef)timer(60_000,60_000).pipe(takeUntilDestroyed(destroyRef)).subscribe(()=>{
+        this.intradayClock.set(Date.now());
+        const visible=typeof document==='undefined'||document.visibilityState==='visible';
+        if(visible&&intradaySession().state==='open')void this.loadIntraday();
+      });
     this.cacheReady = readMarketCache()
       .then((cache) => {
         if (
@@ -227,6 +245,22 @@ export class MarketStore {
   load(): Promise<void> {
     if (!this.pending) this.pending = this.loadFeed().finally(() => (this.pending = undefined));
     return this.pending;
+  }
+  async loadIntraday():Promise<void>{
+    if(this.intradayLoading())return;
+    this.intradayLoading.set(true);this.intradayError.set('');
+    try{
+      const configured=(globalThis as typeof globalThis&{__STOCK_APP_CONFIG__?:{tpexProxyUrl?:string}}).__STOCK_APP_CONFIG__?.tpexProxyUrl?.trim();
+      const base=(configured||'/api/tpex').replace(/\/$/,'');
+      const response=await fetch(`${base}/api/intraday-market`,{cache:'no-store',signal:AbortSignal.timeout(15000)});
+      if(response.status===404){this.intraday.set(null);this.intradayError.set('今日盤中快照尚未產生。');return;}
+      if(!response.ok)throw new Error(`盤中快照 HTTP ${response.status}`);
+      const value=await response.json() as IntradayMarketFeed;
+      if(value?.schemaVersion!==1||value.status!=='ready'||!/^\d{4}-\d{2}-\d{2}$/.test(value.quoteDate)||!Number.isFinite(Date.parse(value.generatedAt))||!Array.isArray(value.quotes)||!Array.isArray(value.provisionalEvents)||!value.coverage||
+        value.quotes.some(quote=>!/^\d{4,6}$/.test(quote.symbol)||![quote.open,quote.high,quote.low,quote.close,quote.volume].every(Number.isFinite)))throw new Error('盤中快照格式不符');
+      this.intraday.set(value);
+    }catch(error){this.intradayError.set(error instanceof Error?error.message:'盤中快照讀取失敗');}
+    finally{this.intradayLoading.set(false);}
   }
   private async loadFeed(): Promise<void> {
     if (this.loading()) return;

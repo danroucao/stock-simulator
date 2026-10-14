@@ -39,6 +39,7 @@ interface MisQuoteResponse {
 }
 
 export interface StockQuote {
+  symbol?: string;
   changeKnown?:boolean;
   date: string;
   name: string;
@@ -76,7 +77,18 @@ export class StockPriceService {
 
   getIntradayQuote(symbol: string): Observable<StockQuote | null> {
     const normalized = symbol.replace(/\D/g, '');
-    return normalized ? this.getTpexLatestQuote(normalized) : of(null);
+    return normalized ? this.getIntradayQuotes([normalized]).pipe(map(quotes=>quotes.find(quote=>quote.symbol===normalized)??null)) : of(null);
+  }
+
+  getIntradayQuotes(symbols: string[]): Observable<StockQuote[]> {
+    const normalized=[...new Set(symbols.map(symbol=>symbol.replace(/\D/g,'')).filter(symbol=>/^\d{4,6}$/.test(symbol)))].slice(0,50);
+    if(!normalized.length)return of([]);
+    return this.http.get<MisQuoteResponse>(`${this.tpexProxyUrl}/api/quotes?symbols=${normalized.join(',')}`).pipe(
+      timeout(15000),
+      map(response=>(response.msgArray||[]).map(row=>this.mapMisRow(row)).filter((quote):quote is StockQuote=>quote!==null)),
+      retry({count:1,delay:error=>error?.status===429?throwError(()=>error):timer(1000)}),
+      catchError(()=>of([])),
+    );
   }
 
   getLatestQuote(symbol: string, requestDate?: string): Observable<StockQuote | null> {
@@ -178,29 +190,15 @@ export class StockPriceService {
   private getTpexLatestQuote(symbol: string): Observable<StockQuote | null> {
     return this.http.get<MisQuoteResponse>(`${this.tpexProxyUrl}/api/quote?symbol=${symbol}`).pipe(
       timeout(15000),
-      map((response) => {
-        const row = response.msgArray?.find((item) => item.c === symbol);
-        if (!row) return null;
-        const previousClose = this.toNumber(row.y ?? '0');
-        const close = this.toNumber(row.z ?? '');
-        const open = this.toNumber(row.o ?? '');
-        const high = this.toNumber(row.h ?? '');
-        const low = this.toNumber(row.l ?? '');
-        if (!/^\d{8}$/.test(row.d ?? '') || close <= 0 || open <= 0 || low <= 0 || high < low || close < low || close > high) return null;
-        return {
-          date: row.d || '',
-          name: row.n?.trim() || symbol,
-          open, high, low,
-          close,
-          change: close - previousClose,
-          turnover: 0,
-          volume: this.toNumber(row.v ?? '0') * 1000,
-          quoteTime: row.t,
-          source: 'MIS' as const,
-        };
-      }),
+      map((response) => this.mapMisRow(response.msgArray?.find((item) => item.c === symbol))),
       catchError(() => of(null)),
     );
+  }
+  private mapMisRow(row: NonNullable<MisQuoteResponse['msgArray']>[number] | undefined): StockQuote|null {
+    if(!row)return null;
+    const previousClose=this.toNumber(row.y??'0'),close=this.toNumber(row.z??''),open=this.toNumber(row.o??''),high=this.toNumber(row.h??''),low=this.toNumber(row.l??'');
+    if(!/^\d{4,6}$/.test(row.c??'')||!/^\d{8}$/.test(row.d??'')||close<=0||open<=0||low<=0||high<low||close<low||close>high)return null;
+    return {symbol:row.c,date:row.d||'',name:row.n?.trim()||row.c!,open,high,low,close,change:close-previousClose,turnover:0,volume:this.toNumber(row.v??'0')*1000,quoteTime:row.t,source:'MIS'};
   }
 
   private getTpexProxyUrl(): string {

@@ -52,6 +52,14 @@ describe('StockPriceService history', () => {
       expect(quote?.change).toBe(1);
     });
   });
+  it('deduplicates a batch watchlist and maps each valid live quote',async()=>{
+    const urls:string[]=[];const service=new StockPriceService({get:(url:string)=>{urls.push(url);return of({msgArray:[
+      {c:'2330',n:'台積電',d:'20261014',t:'10:30:00',z:'101',y:'100',o:'100',h:'102',l:'99',v:'10'},
+      {c:'2353',n:'宏碁',d:'20261014',t:'10:30:01',z:'33',y:'32',o:'32',h:'34',l:'31',v:'20'},
+    ]});}} as any);
+    const quotes=await firstValueFrom(service.getIntradayQuotes(['2330','2353','2330']));
+    expect(urls[0]).toContain('symbols=2330,2353');expect(quotes.map(quote=>quote.symbol)).toEqual(['2330','2353']);
+  });
   it('merges months, sorts old-to-new and returns the requested trading-day count', () => {
     const service = new StockPriceService({ get: () => of({ data: [] }) } as any);
     const responses = [

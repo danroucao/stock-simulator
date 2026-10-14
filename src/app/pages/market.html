@@ -8,23 +8,20 @@
       {{ store.loading() ? '讀取中…' : '重新讀取' }}
     </button>
   </header>
-  @if (store.freshness()) {
-    <p class="notice" role="status">{{ store.freshness() }}</p>
-  }
+  <div class="market-update" [class.failed]="store.updateStatus().kind === 'failed'" role="status">
+    <strong>{{ store.updateStatus().headline }}</strong>
+    @if (store.updateStatus().detail) { <span>{{ store.updateStatus().detail }}</span> }
+  </div>
+  @if(store.intraday();as intraday){<div class="intraday-line" role="status"><strong>盤中共享快照</strong><span>{{store.intradayFreshness()}}・暫時事件 {{intraday.provisionalEvents.length}} 檔</span><button type="button" (click)="store.loadIntraday()" [disabled]="store.intradayLoading()">更新盤中快照</button></div>}
+  @else if(store.intradayError()){<p class="status-line">{{store.intradayError()}} 收盤產業統計仍可正常使用。</p>}
   @if (store.error()) {
     <p class="notice" role="alert">{{ store.error() }}</p>
   }
   @if (store.feed(); as feed) {
     <p class="status-line">
-      行情 {{ feed.date }}｜掃描 {{ store.time(feed.scannedAt) }}（台北）｜上市有效
+      選股／產業統計行情日 {{ feed.date }}｜上次成功掃描 {{ store.time(feed.scannedAt) }}（台北）｜上市有效
       {{ feed.coverage.twse }}、上櫃有效 {{ feed.coverage.tpex }} 檔
     </p>
-    @if (feed.status === 'error') {
-      <p class="notice" role="alert">最近掃描失敗，保留原資料：{{ feed.message }}</p>
-    }
-    @if (feed.dataDelay) {
-      <p class="notice">{{ feed.dataDelay }}</p>
-    }
     <p>成交占比以有效當日普通股成交金額計算，ETF 不納入；不是資金淨流入或投資評分。</p>
     @if (feed.coverage.twse + feed.coverage.tpex < feed.coverage.total) {
       <p class="notice">

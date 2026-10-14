@@ -101,6 +101,7 @@ export class MarketPage {
     void this.store.load().then(() => {
       if (!this.destroyed) afterNextRender(() => { if (!this.destroyed) window.scrollTo(0, this.store.marketScroll); }, { injector:this.injector });
     });
+    void this.store.loadIntraday();
   }
   ngOnDestroy(): void {
     this.destroyed=true;

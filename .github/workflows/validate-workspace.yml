@@ -26,6 +26,8 @@ jobs:
         run: |
           npm test -- --watch=false
           node --test scripts/official-market-data.test.mjs scripts/alert-delivery.test.mjs
+          npm run worker:test
+          npm run worker:check
       - name: Offline scanner persistence checks
         run: |
           node scripts/verify-official-scan.mjs
