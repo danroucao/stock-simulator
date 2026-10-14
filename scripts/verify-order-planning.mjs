@@ -12,9 +12,12 @@ try {for(const width of [1280,390]) {
  const context=await browser.newContext({viewport:{width,height:950}}),page=await context.newPage(),errors=[];
  activePage=page;
  await page.clock.setFixedTime('2026-10-14T03:00:00Z');
+ let releaseFeed;const feedGate=new Promise(resolve=>releaseFeed=resolve);
+ await page.route('**/alerts/index.json',async route=>{await feedGate;await route.continue();});
  page.on('pageerror',e=>errors.push(e.message));await page.route('https://www.twse.com.tw/**',r=>r.abort());await page.route('**/api/**',r=>r.abort());
  await page.goto(base+'#/stock/2353?tab=trade');await page.getByRole('tab',{name:'交易規劃',exact:true}).click();
  await page.getByRole('button',{name:'建立部位',exact:true}).click();const form=page.locator('.board-form');
+ assert.equal(await form.getByLabel('股票代號',{exact:true}).inputValue(),'2353');
  const waitResult=(label,unknown)=>page.waitForFunction(({label,unknown})=>{
    const value=[...document.querySelectorAll('.order-risk-card > div')].find(el=>el.querySelector('span')?.textContent===label)?.querySelector('strong')?.textContent.trim();
    return !!value && (unknown ? value==='無法計算' : value!=='無法計算');
@@ -30,6 +33,8 @@ try {for(const width of [1280,390]) {
  await form.getByLabel('股數',{exact:true}).fill('1000');await form.getByLabel('停損價（選填）',{exact:true}).fill('95');
  await form.getByLabel('預計交易日',{exact:true}).fill(today);await form.getByLabel('有效至',{exact:true}).fill(today);await form.getByLabel('預估持有天數',{exact:true}).fill('12');
  await waitResult('目標預估淨損益',false);
+ releaseFeed();await page.locator('#strategy-board h2').filter({hasText:'宏碁'}).waitFor();
+ assert.equal(await form.getByLabel('委託價',{exact:true}).inputValue(),'100');assert.equal(await form.getByLabel('預計出場價（選填）',{exact:true}).inputValue(),'112');
  const expectedText=(await reward.locator('strong').textContent()).trim();
  await form.getByRole('button',{name:'建立買進委託',exact:true}).dblclick();await page.locator('.preset-order-row').waitFor();assert.equal(await page.locator('.preset-order-row').count(),1);
  assert.ok((await page.locator('.preset-order-row').textContent()).includes(expectedText));

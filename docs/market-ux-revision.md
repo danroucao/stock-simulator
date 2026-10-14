@@ -1,6 +1,6 @@
 # 市場工作區第二輪修正（2026-10-13，已發布基準）
 
-此 UX 修正已於 2026/10/13 經 PR #3 發布，遠端 CI、Pages 與正式網站桌面／手機驗證通過；詳見 pages-market-ux-release-20261013.md。未修改 repository variables、權限或 Cloudflare Worker。2026/10/14 後續修正另見交易與選股驗收文件，尚未發布。
+此 UX 修正已於 2026/10/13 經 PR #3 發布，遠端 CI、Pages 與正式網站桌面／手機驗證通過；詳見 pages-market-ux-release-20261013.md。未修改 repository variables、權限或 Cloudflare Worker。2026/10/14 後續交易與選股修正已經 PR #4 發布；慢速載入補強及發布履歷見 pages-trading-release-20261014.md。
 
 ## 篩選與返回
 

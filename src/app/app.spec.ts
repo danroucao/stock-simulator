@@ -7,6 +7,21 @@ import { App } from './app';
 import { StockPriceService } from './stock-price.service';
 
 describe('App', () => {
+  it('binds a direct stock route immediately and preserves input when its market feed arrives later', async () => {
+    const app=TestBed.createComponent(App).componentInstance as any;
+    let release!:()=>void;const ready=new Promise<void>(resolve=>release=resolve);
+    app.router={url:'/stock/2353?tab=trade',parseUrl:()=>({root:{children:{primary:{segments:[{path:'stock'},{path:'2353'}]}}},queryParams:{tab:'trade'}})};
+    vi.spyOn(app,'loadCurrentPrice').mockImplementation(()=>{});
+    vi.spyOn(app.alertStore,'load').mockReturnValue(ready);
+    vi.spyOn(app.alertStore,'loadHistory').mockResolvedValue([]);
+    app.alertStore.feed.set({stocks:[{symbol:'2353',name:'宏碁',date:'2026-10-13',close:33,turnover:100}],events:[]});
+    app.marketStore.feed.set({stocks:[]});
+    app.applyRoute();expect(app.positionForm().symbol).toBe('2353');
+    app.changeOrderMode('preset');app.onPositionFieldChange('entryPrice',100);app.onPositionFieldChange('stopLossPrice',95);app.onPositionFieldChange('targetPrice',112);
+    const draft={...app.positionForm()};release();await ready;await Promise.resolve();await Promise.resolve();
+    expect(app.positionForm()).toEqual(draft);expect(app.stockName()).toBe('宏碁');
+    app.router=null;
+  });
   it('uses identical estimates in the form and saved card, persists dates and prevents duplicate submissions', () => {
     localStorage.clear();
     const app = TestBed.createComponent(App).componentInstance as any;
