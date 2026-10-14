@@ -27,13 +27,15 @@ try {
   await right.waitForFunction(() => [...document.querySelectorAll('label')].some(label => label.textContent.trim() === '可用現金' && label.querySelector('input')?.value === '123456'));
   await right.getByText('交易成本模型（自訂假設）', { exact: true }).click();
   await right.getByLabel('融資年利率（%）', { exact: true }).fill('6.7');
-  await right.getByLabel('融資年利率（%）', { exact: true }).press('Tab');
+  await right.getByLabel('融資年利率（%）', { exact: true }).blur();
   await right.getByLabel('融券年費率（%）', { exact: true }).fill('2.1');
-  await right.getByLabel('融券年費率（%）', { exact: true }).press('Tab');
-  await right.waitForFunction(() => {
+  await right.getByLabel('融券年費率（%）', { exact: true }).blur();
+  await right.getByRole('button', { name: '立即儲存', exact: true }).click();
+  const savedRates = await right.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('stock-simulator-workspace-v1'));
-    return saved.financingRate === 6.7 && saved.shortBorrowRate === 2.1;
+    return { financingRate: saved.financingRate, shortBorrowRate: saved.shortBorrowRate };
   });
+  assert.deepEqual(savedRates, { financingRate: 6.7, shortBorrowRate: 2.1 });
   await right.reload();
   await right.locator('#workspace-settings > details > summary').click();
   await right.getByText('交易成本模型（自訂假設）', { exact: true }).click();
