@@ -83,4 +83,8 @@ test('keyless provider downloads both markets, validates all six action feeds, a
  const settings={cacheRoot,now:new Date('2026-10-10T00:00:00Z'),fetchImpl,log:()=>{},delayMs:0,historyCount:70};
  const first=await loadOfficialMarket(settings);assert.equal(first.universe.size,1001);assert.equal(first.sessions.length,70);assert.equal(first.metadata.priceBasis,'raw-action-screened');assert.equal(first.requests,153);assert.ok(first.all.get('1000')[0].action);assert.ok(!first.sessions.includes('2026-07-10'));assert.ok(first.metadata.closedDates.includes('2026-07-10'));
  const second=await loadOfficialMarket(settings);assert.equal(second.requests,17);assert.equal(second.cacheHits,136);assert.deepEqual(second.all,first.all);
+ await assert.rejects(
+  loadOfficialMarket({...settings,now:new Date('2026-10-12T08:00:00Z')}),
+  error=>error.code==='MARKET_DATA_PENDING'&&error.expectedMarketDate==='2026-10-12'&&/截至 2026-10-08/.test(error.message),
+ );
 });

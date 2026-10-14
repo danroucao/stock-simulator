@@ -47,7 +47,7 @@
 
 GitHub Actions 使用 cache restore／save 保存官方原始行情；失敗掃描已驗證完成的下載也可保留快取。Cache 可能失效或被平台淘汰，屆時自動重新回補。快取不是掃描狀態的唯一保存位置：`scan-data/state.json` 與公開結果必須在同一成功 commit 持久化。
 
-現有排程在台北時間週一至五 19:20 執行。`MARKET_SCAN_PUBLISH_ENABLED=true` 才發布每日結果；未設時跳過定時工作。手動 `publish=false` 驗證不寫回結果；`publish=true` 才寫回並 dispatch Pages。GitHub 排程、官方資料及 Pages 發布都可能延遲，畫面始終保留實際行情日與成功掃描時間。
+現有排程在台北時間週一至五 15:40、16:40、17:40 執行。每次工作最多嘗試三次，間隔八分鐘；來源仍未齊全時保留上次成功結果並發布可見的錯誤原因，不以舊日期完成新掃描。`MARKET_SCAN_PUBLISH_ENABLED=true` 才發布每日結果；未設時跳過定時工作。手動 `publish=false` 驗證不寫回結果；`publish=true` 才寫回並 dispatch Pages。GitHub 排程、官方資料及 Pages 發布都可能延遲，畫面分開顯示個股行情日、選股行情日與成功掃描時間。
 
 UI 顯示實際檢查與排除數，符合條件股票的詳情圖保留最近 70 日，與規則及區間使用相同原始價格基準。被排除股票不提供有誤判風險的觀察曲線，仍可接到既有個股行情頁；歷史事件快照保留。
 

@@ -1,7 +1,8 @@
 import { Component, computed, inject, OnInit, output, signal,afterNextRender,Injector } from '@angular/core';
 import {AlertListSession} from '../../services/alert-list-session';
 import { DecimalPipe } from '@angular/common';
-import { AlertStore, AlertSelection, alertFreshness } from '../../services/alert-store';
+import { AlertStore, AlertSelection } from '../../services/alert-store';
+import { marketUpdateStatus } from '../../services/market-update-status';
 import { AlertKind, AlertStock } from '../../services/market-alerts';
 import { exclusionSummary, upperDistance } from '../../services/alert-presentation';
 import { Router, NavigationStart } from '@angular/router';
@@ -42,7 +43,7 @@ export class AlertCenter implements OnInit {
   private tabStocks():AlertStock[] {return this.store.feed()?.stocks.filter(s=>this.tab()==='new' ? !!this.latestEvents().get(s.symbol)?.length : this.tab()==='current' ? s.eligible && !!s.kinds.length : this.store.following(s.symbol)) || [];}
   readonly categories: Array<AlertKind|'全部'> = ['全部','整理觀察','突破提醒','跌破提醒','均線偏離'];
   readonly checkedAt = signal(new Date());
-  readonly stale = computed(()=>alertFreshness(this.store.feed(),this.checkedAt()));
+  readonly updateStatus = computed(()=>{const feed=this.store.feed();return marketUpdateStatus(feed?{date:feed.marketDate,scannedAt:feed.scannedAt,status:feed.status,attemptedAt:feed.attemptedAt,expectedDate:feed.expectedMarketDate,message:feed.message,calendarYears:feed.calendarYears,closedDates:feed.closedDates}:null,this.checkedAt());});
   readonly newCount = computed(()=>new Set(this.store.feed()?.events.filter(e=>e.date===this.store.feed()?.marketDate).map(e=>e.symbol)).size);
   readonly missingFollows = computed(()=>this.store.follows().filter(s=>!this.store.feed()?.stocks.some(r=>r.symbol===s.symbol)));
   readonly rows = computed(()=>{

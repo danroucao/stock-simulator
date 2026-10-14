@@ -10,6 +10,9 @@
   border: 1px solid #36506e;
   border-radius: 18px;
 }
+.market-update { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; margin:16px 0 8px; padding:12px 14px; border-left:3px solid #66c8ff; border-radius:8px; background:#10233b; }
+.market-update span { color:#b9cae0; font-size:.86rem; }
+.market-update.failed { border-left-color:#ffb45d; background:#342d22; }
 header,
 .filters,
 .quick,
@@ -46,6 +49,7 @@ a {
   padding: 10px 12px;
   box-sizing: border-box;
 }
+header > button { border-color:#6acaff; background:#1b5b87; font-weight:700; }
 a {
   display: inline-flex;
   align-items: center;
@@ -85,6 +89,13 @@ fieldset input {
 .chips {
   margin: 16px 0;
 }
+.filters { display:grid; grid-template-columns:minmax(220px,2fr) minmax(150px,1fr) minmax(160px,1fr); align-items:end; }
+.filters > * { min-width:0; }
+.filters input,.filters select { width:100%; }
+.quick { align-items:stretch; }
+.quick button { border-radius:999px; background:#0f233b; }
+.chips { align-items:center; }
+.chips span,.condition-chip { max-width:100%; overflow-wrap:anywhere; }
 .chips span {
   padding: 6px;
   background: #193551;
@@ -115,6 +126,11 @@ th {
   border-bottom: 1px solid #29425f;
   vertical-align: top;
 }
+th:first-child,td:first-child { width:190px; min-width:150px; }
+th:last-child,td:last-child { width:132px; min-width:116px; }
+td:not(:first-child):not(:last-child),th:not(:first-child):not(:last-child) { text-align:right; }
+td p,td small { overflow-wrap:anywhere; }
+td:last-child button { width:100%; white-space:nowrap; }
 td span,
 td small {
   display: block;
@@ -168,6 +184,7 @@ input[type='checkbox'] {
   .filters > label {
     width: 100%;
   }
+  .filters { display:grid; grid-template-columns:1fr; }
   input,
   select {
     max-width: 100%;
@@ -229,4 +246,10 @@ td:nth-child(3),td:nth-child(4) { font-variant-numeric:tabular-nums; }
   .filter-panel .filters { margin-top:18px; }
   .filter-panel input,.filter-panel select { box-sizing:border-box; width:100%; }
   .results tr { border:0; background:#10233b; }
+}
+@media (min-width:701px) and (max-width:1000px) {
+  .market-page { margin:16px; }
+  .filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .filters > details { grid-column:1/-1; }
+  .quick button { flex:1 1 180px; }
 }

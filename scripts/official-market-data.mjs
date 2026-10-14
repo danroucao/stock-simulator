@@ -163,7 +163,10 @@ export async function loadOfficialMarket({ cacheRoot='scan-data/official', now=n
   const universe=new Map([...listed,...otc]);
   const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(now);
   const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',hour:'2-digit',hourCycle:'h23'}).format(now));
-  const cursor=new Date(`${today}T00:00:00Z`);if(hour<19)cursor.setUTCDate(cursor.getUTCDate()-1);
+  // The close is complete at 13:30. Start checking the same-day official publication after
+  // 15:30; before then the latest completed session remains the previous trading day.
+  const minute=Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',minute:'2-digit'}).format(now));
+  const cursor=new Date(`${today}T00:00:00Z`);if(hour*60+minute<15*60+30)cursor.setUTCDate(cursor.getUTCDate()-1);
   const calendars=new Map(), planned=[];
   for(let offset=0;offset<366 && planned.length<historyCount;offset++) {
     const date=cursor.toISOString().slice(0,10), year=cursor.getUTCFullYear();
@@ -186,7 +189,12 @@ export async function loadOfficialMarket({ cacheRoot='scan-data/official', now=n
   if(sessions.length<historyCount)throw new Error('官方歷史成交統計不足 100 個交易日');
   const target=sessions.at(-1), start=sessions[0];
   const dataDelay=target<expectedMarketDate?`官方交易統計截至 ${target}，尚未涵蓋預期交易日 ${expectedMarketDate}；可能是來源延遲或臨時休市，保留實際行情日期。`:undefined;
-  if(dataDelay)log(dataDelay);
+  if(dataDelay) {
+    const error=new Error(dataDelay);
+    error.code='MARKET_DATA_PENDING';
+    error.expectedMarketDate=expectedMarketDate;
+    throw error;
+  }
   log(`官方日線範圍 ${start}～${target}，${historyCount} 個交易日`);
   const actions=[];
   for(const source of ACTION_SOURCES) {

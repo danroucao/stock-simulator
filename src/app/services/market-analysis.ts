@@ -100,6 +100,7 @@ export interface MarketAnalysisFeed {
   schemaVersion: 2;
   date: string;
   scannedAt: string;
+  attemptedAt?: string;
   status: 'ready' | 'error';
   message?: string;
   basis: string;

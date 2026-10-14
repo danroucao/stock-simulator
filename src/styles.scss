@@ -1,1 +1,18 @@
-/* You can add global styles to this file, and also import other style files */
+:root {
+  --control-height: 44px;
+  --control-radius: 10px;
+  --control-padding: 10px 14px;
+  --content-width: 1200px;
+  --section-gap: 20px;
+}
+html { background:#071323; }
+body { margin:0; min-width:320px; }
+button, input, select { font:inherit; }
+button { min-height:var(--control-height); border-radius:var(--control-radius); padding:var(--control-padding); }
+button:disabled { cursor:not-allowed; opacity:.5; }
+input:not([type='checkbox']):not([type='radio']), select { min-height:var(--control-height); border-radius:var(--control-radius); padding:8px 12px; box-sizing:border-box; }
+table { font-variant-numeric:tabular-nums; }
+th[align='right'], td[align='right'], .numeric { text-align:right; }
+@media(max-width:480px) {
+  :root { --control-padding:10px 12px; }
+}

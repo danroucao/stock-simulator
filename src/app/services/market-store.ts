@@ -1,6 +1,5 @@
 import { Injectable, signal,computed } from '@angular/core';
-import {alertFreshness} from './alert-store';
-import type {AlertFeed} from './market-alerts';
+import { marketUpdateStatus } from './market-update-status';
 import type { MarketAnalysisFeed, MetricKey } from './market-analysis';
 import {
   SavedScreen,
@@ -81,7 +80,7 @@ function restore<T>(key: string, fallback: T): T {
 }
 @Injectable({ providedIn: 'root' })
 export class MarketStore {
- readonly freshness=computed(()=>{const feed=this.feed();return feed?alertFreshness({marketDate:feed.date,calendarYears:feed.calendarYears,closedDates:feed.closedDates} as AlertFeed):'';});
+ readonly updateStatus=computed(()=>{const feed=this.feed();return marketUpdateStatus(feed?{date:feed.date,scannedAt:feed.scannedAt,status:feed.status,attemptedAt:feed.attemptedAt,expectedDate:feed.expectedDate,message:feed.message,calendarYears:feed.calendarYears,closedDates:feed.closedDates}:null);});
   readonly importPreview = signal<{ saved: SavedScreen[]; events: ScreenEvent[] } | null>(null);
   exportConditions(): void {
     const blob = new Blob(
