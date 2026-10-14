@@ -13,6 +13,7 @@
   }
   @if (store.feed(); as feed) {
     <div class="market-update" [class.failed]="store.updateStatus().kind === 'failed'" role="status"><strong>{{ store.updateStatus().headline }}</strong>@if (store.updateStatus().detail) { <span>{{ store.updateStatus().detail }}</span> }</div>
+    @if(store.intraday()){<div class="intraday-line" role="status"><strong>盤中行情</strong><span>{{store.intradayFreshness()}}</span><button type="button" (click)="store.loadIntraday()" [disabled]="store.intradayLoading()">更新共享快照</button></div>}
     <p class="status-line">
       選股掃描行情日 {{ feed.date }} · 上次成功掃描 {{ store.time(feed.scannedAt) }}（台北） · 已檢查
       {{ feed.coverage.checked }}／{{ feed.coverage.total }} 檔｜完整可分析
@@ -225,6 +226,7 @@
                     : (stock.metrics.change.value | number: '1.2-2') + '%'
                 }}</span
               ><small>行情 {{ stock.date }}</small>
+              @if(store.intradayBySymbol().get(stock.symbol);as quote){<small class="intraday-price">盤中 {{quote.close|number:'1.0-2'}} 元・{{quote.time||'時間未提供'}}（延遲快照）</small>}
             </td>
             <td><details [open]="resultFocus() === 'range' || resultFocus() === 'all'"><summary>區間與方向</summary>
               <span

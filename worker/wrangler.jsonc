@@ -2,6 +2,20 @@
   "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
   "name": "stock-simulator-tpex-proxy",
   "main": "src/index.js",
-  "compatibility_date": "2026-08-01",
-  "workers_dev": true
+  "compatibility_date": "2026-10-14",
+  "workers_dev": true,
+  "kv_namespaces": [
+    { "binding": "INTRADAY" }
+  ],
+  "vars": {
+    "PUBLIC_MARKET_FEED_URL": "https://danroucao.github.io/stock-simulator/market/latest.json"
+  },
+  "triggers": {
+    "crons": ["*/5 1-5 * * 1-5"]
+  },
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true },
+    "head_sampling_rate": 0.1
+  }
 }

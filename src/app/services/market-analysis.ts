@@ -119,6 +119,16 @@ export interface MarketAnalysisFeed {
   classificationDate: string;
   historyVersion?: string;
 }
+export interface IntradayMarketQuote {
+  symbol:string;name:string;date:string;time:string;open:number;high:number;low:number;close:number;previousClose:number;change:number;volume:number;
+}
+export interface IntradayProvisionalEvent {
+  id:string;symbol:string;name:string;market:'twse'|'tpex';state:string;quoteDate:string;quoteTime:string;price:number;lower:number;upper:number;reason:string;
+}
+export interface IntradayMarketFeed {
+  schemaVersion:1;status:'ready';quoteDate:string;generatedAt:string;source:string;
+  coverage:{valid:number;total:number};quotes:IntradayMarketQuote[];provisionalEvents:IntradayProvisionalEvent[];
+}
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 const metric = (value: number | null, reason: string | null = null): Metric => ({
   value,

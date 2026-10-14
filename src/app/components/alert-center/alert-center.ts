@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnInit, output, signal,afterNextRender,Injector } from '@angular/core';
+import { Component, computed, inject, OnInit, output, signal,afterNextRender,Injector,DestroyRef } from '@angular/core';
 import {AlertListSession} from '../../services/alert-list-session';
 import { DecimalPipe } from '@angular/common';
 import { AlertStore, AlertSelection } from '../../services/alert-store';
@@ -7,13 +7,18 @@ import { AlertKind, AlertStock } from '../../services/market-alerts';
 import { exclusionSummary, upperDistance } from '../../services/alert-presentation';
 import { Router, NavigationStart } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {timer} from 'rxjs';
+import {StockPriceService,StockQuote} from '../../stock-price.service';
+import {intradaySession} from '../../services/intraday-session';
 
 @Component({selector:'app-alert-center',imports:[DecimalPipe],templateUrl:'./alert-center.html',styleUrl:'./alert-center.scss'})
 export class AlertCenter implements OnInit {
   private readonly router=inject(Router,{optional:true});
   private destroyed=false;
   private departureScroll:number|undefined;
-  constructor(){this.router?.events.pipe(takeUntilDestroyed()).subscribe(event=>{if(event instanceof NavigationStart && event.url.split('?')[0]!=='/alerts')this.departureScroll=window.scrollY;});}
+  private readonly prices=inject(StockPriceService);
+  private readonly destroyRef=inject(DestroyRef);
+  constructor(){this.router?.events.pipe(takeUntilDestroyed()).subscribe(event=>{if(event instanceof NavigationStart && event.url.split('?')[0]!=='/alerts')this.departureScroll=window.scrollY;});timer(60000,60000).pipe(takeUntilDestroyed()).subscribe(()=>{if(this.followLiveEnabled()&&document.visibilityState==='visible')this.refreshFollowQuotes();});}
   private readonly session=inject(AlertListSession);private readonly injector=inject(Injector);
   readonly Math = Math;
   readonly more=(value:number)=>value+20;
@@ -25,6 +30,8 @@ export class AlertCenter implements OnInit {
   readonly minTurnover = signal(0); readonly sort = signal('event');
   readonly deviationFilter=signal('all');
   readonly limit=signal(20);
+  readonly followLiveEnabled=signal(false);readonly followLiveLoading=signal(false);readonly followLiveStatus=signal('');
+  readonly followQuotes=signal(new Map<string,StockQuote>());private followRequestId=0;
   readonly distance=upperDistance;
   readonly exclusions=computed(()=>this.store.feed() ? exclusionSummary(this.store.feed()!) : null);
   readonly eligibleCount=computed(()=>this.store.feed()?.stocks.filter(s=>s.eligible).length || 0);
@@ -36,6 +43,23 @@ export class AlertCenter implements OnInit {
   });
   readonly visibleRows=computed(()=>this.rows().slice(0,this.limit()));
   selectTab(tab:'new'|'current'|'follows'):void {this.tab.set(tab);this.limit.set(20);}
+  toggleFollowLive():void{
+    const session=intradaySession();
+    if(session.state!=='open'){this.followLiveStatus.set(session.label);return;}
+    this.followLiveEnabled.update(value=>!value);++this.followRequestId;
+    if(this.followLiveEnabled())this.refreshFollowQuotes();else{this.followLiveLoading.set(false);this.followLiveStatus.set('已停止盤中追蹤');}
+  }
+  refreshFollowQuotes():void{
+    const symbols=this.store.follows().map(stock=>stock.symbol);
+    if(!symbols.length){this.followLiveStatus.set('尚未加入追蹤股票');return;}
+    if(intradaySession().state!=='open'){this.followLiveStatus.set(intradaySession().label);return;}
+    const requestId=++this.followRequestId;this.followLiveLoading.set(true);
+    this.prices.getIntradayQuotes(symbols).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(quotes=>{
+      if(requestId!==this.followRequestId||!this.followLiveEnabled())return;
+      this.followLiveLoading.set(false);this.followQuotes.set(new Map(quotes.map(quote=>[quote.symbol!,quote])));
+      this.followLiveStatus.set(quotes.length?`已更新 ${quotes.length}／${symbols.length} 檔・60 秒輪詢・來源可能延遲`:'未取得當日有效盤中成交，保留收盤資料');
+    });
+  }
   selectCategory(kind:AlertKind|'全部'):void {this.category.set(kind);this.limit.set(20);}
   count(kind:AlertKind|'全部'):number {
     return this.tabStocks().filter(s=>kind==='全部'||(this.tab()==='new' ? this.latestEvents().get(s.symbol)?.some(e=>e.kind===kind) : s.kinds.includes(kind))).length;

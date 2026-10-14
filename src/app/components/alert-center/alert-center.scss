@@ -8,6 +8,7 @@ button[aria-pressed=true] { background:#194767; border-color:#7fd1ff; color:#bce
 .market-update { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; margin:16px 0 8px; padding:12px 14px; border-left:3px solid #66c8ff; border-radius:8px; background:#10233b; }
 .market-update span { color:#b9cae0; font-size:.86rem; }
 .market-update.failed { border-left-color:#ffb45d; background:#342d22; }
+.intraday-follow {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-left:3px solid #58d6a5;border-radius:8px;background:#0f2b2d}.intraday-follow p{margin:4px 0 0;color:#b9dcd2;font-size:.84rem}.live-price{color:#7ee7ba}
 header>button { border-color:#6acaff; background:#1b5b87; font-weight:700; }
 .update-grid { display:grid; grid-template-columns:1fr 1.4fr 1fr; gap:16px; margin:24px 0 16px; } .update-grid div { background:#10233b; border-radius:12px; padding:16px; } .update-grid span,.update-grid strong { display:block; } .update-grid span { font-size:.8rem; color:#a9bdd5; margin-bottom:8px; }
 .notice { background:#342d22; border:1px solid #786744; padding:14px; border-radius:10px; margin:12px 0; line-height:1.7; } .notice p { margin:6px 0; }

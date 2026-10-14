@@ -20,6 +20,7 @@ import { PortfolioCalculatorService } from './services/portfolio-calculator.serv
 import { StockHistoryPoint, StockPriceService } from './stock-price.service';
 import {Router,RouterLink,RouterOutlet,NavigationEnd,ActivatedRoute} from '@angular/router';
 import {AlertStore} from './services/alert-store';
+import {intradaySession as intradaySessionState} from './services/intraday-session';
 import {MarketStore} from './services/market-store';
 import {WorkspaceSession} from './services/workspace-session';
 import {amount,chartChange} from './services/market-presentation';
@@ -279,7 +280,9 @@ export class App {
   protected readonly pendingStockRecordDelete = signal<string | null>(null);
   protected readonly requestedDate = signal(this.todayInputValue());
   protected readonly effectiveMarketDate = computed(() => latestTradingDate(this.requestedDate()));
-  protected readonly canUpdateIntraday = computed(() => this.requestedDate() === this.todayDate() && isTradingDate(this.todayDate()));
+  private readonly clock=signal(new Date());
+  protected readonly intradaySession=computed(()=>intradaySessionState(this.clock()));
+  protected readonly canUpdateIntraday = computed(() => this.requestedDate() === this.todayDate() && this.intradaySession().state==='open');
   protected readonly chartDays = signal(20);
   protected readonly limitUpPrice = signal(685);
   protected readonly limitDownPrice = signal(610);
@@ -391,6 +394,8 @@ export class App {
   protected readonly planningLevels = computed(() => planningReference(this.indicatorHistory()));
   private readonly destroyRef = inject(DestroyRef);
   private liveRequestId = 0;
+  private liveFailures=0;
+  private liveRetryAt=0;
   protected readonly liveEnabled = signal(false);
   protected readonly liveLoading = signal(false);
   protected readonly liveStatus = signal('');
@@ -1434,8 +1439,9 @@ export class App {
     if(this.router){this.applyRoute();this.router.events.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(e=>{if(e instanceof NavigationEnd)this.applyRoute();});}
     this.destroyRef.onDestroy(()=>{if(this.autoSaveEnabled()&&!this.storageConflict())this.saveWorkspace();this.session.raw=this.workspaceBackupJson();this.session.baseline=this.savedWorkspaceContent();this.session.stored=this.expectedStoredWorkspace;});
     timer(30000, 30000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      this.clock.set(new Date());
       this.refreshCalendar();
-      if (this.liveEnabled() && document.visibilityState === 'visible') this.refreshIntraday();
+      if (this.liveEnabled() && document.visibilityState === 'visible' && Date.now()>=this.liveRetryAt) this.refreshIntraday();
     });
     const onStorage = (event: StorageEvent) => {
       if (event.storageArea === localStorage && (event.key === this.workspaceStorageKey || event.key === null) && localStorage.getItem(this.workspaceStorageKey) !== this.expectedStoredWorkspace) {
@@ -1443,7 +1449,7 @@ export class App {
         this.autoSaveEnabled.set(false);
       }
     };
-    const onVisible = () => { if (document.visibilityState === 'visible') this.refreshCalendar(); };
+    const onVisible = () => { if (document.visibilityState === 'visible'){this.clock.set(new Date());this.refreshCalendar();if(this.liveEnabled()&&Date.now()>=this.liveRetryAt)this.refreshIntraday();} };
     const onPageHide=()=>{if(this.autoSaveEnabled()&&!this.storageConflict())this.saveWorkspace();};
     window.addEventListener('pagehide',onPageHide);
     window.addEventListener('storage', onStorage);
@@ -1453,18 +1459,21 @@ export class App {
 
   protected toggleLive(): void {
     if (this.requestedDate() !== this.todayDate()) { this.liveStatus.set('歷史日期查詢：暫停盤中更新'); return; }
-    if (!isTradingDate(this.todayDate())) { this.liveStatus.set('今日休市，暫停盤中更新'); return; }
+    this.clock.set(new Date());
+    if (this.intradaySession().state!=='open') { this.liveStatus.set(this.intradaySession().label); return; }
     this.liveEnabled.update(value => !value);
     ++this.liveRequestId;
     this.liveLoading.set(false);
     this.liveStatus.set('');
+    this.liveFailures=0;this.liveRetryAt=0;
     if (this.liveEnabled()) this.refreshIntraday();
   }
 
   private refreshIntraday(): void {
     const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Taipei' }).format(new Date());
-    if (!isTradingDate(today)) {
-      this.liveStatus.set('今日休市，暫停盤中更新');
+    this.clock.set(new Date());
+    if (this.intradaySession().state!=='open') {
+      this.liveStatus.set(this.intradaySession().label);
       return;
     }
     if (this.requestedDate() !== today) {
@@ -1479,7 +1488,8 @@ export class App {
       if (requestId !== this.liveRequestId || symbol !== this.stockSymbol() || this.requestedDate() !== today || !this.liveEnabled()) return;
       this.liveLoading.set(false);
       if (!quote || quote.date !== today.replaceAll('-', '')) {
-        this.liveStatus.set('無當日有效成交行情，保留歷史資料');
+        this.liveFailures++;const seconds=Math.min(300,30*2**Math.min(this.liveFailures,3));this.liveRetryAt=Date.now()+seconds*1000;
+        this.liveStatus.set(`無當日有效成交行情，保留歷史資料；${seconds} 秒後重試`);
         return;
       }
       const date = `${Number(quote.date.slice(0, 4)) - 1911}/${quote.date.slice(4, 6)}/${quote.date.slice(6, 8)}`;
@@ -1495,6 +1505,7 @@ export class App {
       this.quoteSourceTime.set(quote.quoteTime ?? '未提供');
       this.quoteFetchedAt.set(this.formatSavedTime(new Date()));
       this.latestPrices.update(prices => ({ ...prices, [symbol]: quote.close }));
+      this.liveFailures=0;this.liveRetryAt=0;
       this.liveStatus.set(`行情時間 ${date} ${quote.quoteTime || '未提供'}（台北）・30 秒輪詢，來源可能延遲`);
     });
   }

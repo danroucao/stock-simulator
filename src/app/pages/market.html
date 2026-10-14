@@ -12,6 +12,8 @@
     <strong>{{ store.updateStatus().headline }}</strong>
     @if (store.updateStatus().detail) { <span>{{ store.updateStatus().detail }}</span> }
   </div>
+  @if(store.intraday();as intraday){<div class="intraday-line" role="status"><strong>盤中共享快照</strong><span>{{store.intradayFreshness()}}・暫時事件 {{intraday.provisionalEvents.length}} 檔</span><button type="button" (click)="store.loadIntraday()" [disabled]="store.intradayLoading()">更新盤中快照</button></div>}
+  @else if(store.intradayError()){<p class="status-line">{{store.intradayError()}} 收盤產業統計仍可正常使用。</p>}
   @if (store.error()) {
     <p class="notice" role="alert">{{ store.error() }}</p>
   }

@@ -6,6 +6,7 @@
     "start": "ng serve",
     "worker:dev": "wrangler dev --config worker/wrangler.jsonc --port 8787",
     "worker:check": "wrangler deploy --config worker/wrangler.jsonc --dry-run",
+    "worker:test": "node --test worker/src/intraday.test.mjs",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
