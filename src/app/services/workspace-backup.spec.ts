@@ -6,6 +6,14 @@ function backup() {
     tradePositions: [{ id: 'position', symbol: '2330', type: '現股多單', shares: 100, entryPrice: 100, targetPrice: 110, tradeDate: '2026-02-01', note: '' }] };
 }
 describe('workspace backup validation', () => {
+  it('preserves independent order dates and rejects inverted dates without inventing dates for old orders', () => {
+    const order={id:'test',symbol:'2353',type:'現股多單',shares:1000,entryPrice:100,createdAt:'2026-10-14',expiryDate:'2026-10-16',plannedTradeDate:'2026-10-15',estimatedHoldingDays:12,validDays:5};
+    const data={...backup(),presetOrders:[order]};
+    expect(validateWorkspaceBackup(JSON.stringify(data))['presetOrders'][0].estimatedHoldingDays).toBe(12);
+    expect(()=>validateWorkspaceBackup(JSON.stringify({...data,presetOrders:[{...order,plannedTradeDate:'2026-10-17'}]}))).toThrow('預計交易日');
+    const old={...order,plannedTradeDate:undefined,estimatedHoldingDays:undefined};
+    expect(validateWorkspaceBackup(JSON.stringify({...data,presetOrders:[old]}))['presetOrders'][0].plannedTradeDate).toBeUndefined();
+  });
   it('preserves optional interest rates and rejects invalid values', () => {
     const data = { ...backup(), financingRate: 6.7, shortBorrowRate: 2.1 };
     expect(validateWorkspaceBackup(JSON.stringify(data))['financingRate']).toBe(6.7);

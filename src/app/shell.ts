@@ -1,5 +1,6 @@
 import { Component, signal, inject, OnInit } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd, Scroll } from '@angular/router';
+import { ViewportScroller } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 @Component({
   selector: 'app-root',
@@ -31,6 +32,7 @@ export class Shell implements OnInit {
   readonly expanded = signal(false);
   readonly loading = signal(false);
   private router = inject(Router);
+  private viewport = inject(ViewportScroller);
   readonly items = [
     { path: '/overview', name: '總覽' },
     { path: '/market', name: '市場動向' },
@@ -41,7 +43,12 @@ export class Shell implements OnInit {
     { path: '/settings', name: '設定' },
   ];
   constructor() {
+    this.viewport.setHistoryScrollRestoration('manual');
     this.router.events.pipe(takeUntilDestroyed()).subscribe((e) => {
+      // List pages restore after their data renders; URL synchronization must not reset them.
+      if (e instanceof Scroll && !['/screener','/market','/alerts'].some(path => this.router.url.split('?')[0] === path)) {
+        this.viewport.scrollToPosition(e.position ?? [0,0]);
+      }
       if (e instanceof NavigationEnd) {
         const symbol=/^\/stock\/(\d{4,6})/.exec(e.urlAfterRedirects)?.[1];if(symbol){const item=this.items.find(i=>i.name==='個股分析');if(item)item.path='/stock/'+symbol;}
         this.expanded.set(false);

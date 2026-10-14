@@ -45,7 +45,7 @@
       } @placeholder { <p class="record-empty">持倉明細於查看時載入。</p> } @loading { <p role="status">持倉明細載入中…</p> } @error { <p role="alert">持倉明細載入失敗，請重新整理頁面。</p> }
 </ng-template>
   <router-outlet/>@if(hasSamplePositions()&&page()!=='legacy'){<p class="record-status">工作區含示意持倉，可到總覽移除；並非真實成交回報。</p>}<aside class="workspace-status">    <p class="save-status" role="status">{{ hasUnsavedChanges() ? (autoSaveEnabled() ? '有變更，將自動儲存…' : '有尚未儲存的變更') : (saveStatus() || '資料已儲存') }}</p>
-    @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p> }
+    @if (saveError()) { <p class="record-status error" role="alert">{{ saveError() }}</p><button type="button" class="ghost-button" (click)="saveWorkspace()">重試儲存</button> }
     @if (numericSettingsError()) { <p class="record-status error" role="alert">{{ numericSettingsError() }}</p> }
     @if (storageConflict()) {
       <div class="export-settings" role="alert"><strong>另一分頁已修改工作區，自動儲存已暫停</strong><p>請先下載備份保留目前內容，再選擇採用另一分頁資料，或保留本頁覆寫。覆寫前會在瀏覽器保留另一份資料。</p>
@@ -236,7 +236,7 @@
       <div class="chart-wrap" (click)="onBarLeave()">
         @if (effectiveMarketDate() !== requestedDate()) { <p role="status">{{ displayDate(requestedDate()) }} 休市，查詢截至 {{ displayDate(effectiveMarketDate()) }} 的最近交易日資料；盤中更新暫停。</p> }
         @if (historyError()) { <p class="error-text" role="alert">{{ historyError() }}</p> }
-        @if (isLoadingQuote() || historyLoading()) { <p role="status">{{ isLoadingQuote() ? '正在取得報價…' : '正在載入歷史圖表…' }}</p> }
+        @if (isLoadingQuote() || historyLoading()) { <p role="status">{{ isLoadingQuote() ? '正在取得報價…' : '正在載入 ' + stockLabel(stockSymbol(), stockName()) + ' 走勢…' }}</p> }
         @if (priceAlertMessage()) { <p class="portfolio-warning" role="status">{{ priceAlertMessage() }}（依最近取得行情）</p> }
         @if (quoteFetchedAt()) {
           <p class="backtest-note">來源：{{ quoteSource() }} · 行情日期 {{ displayDate(quoteDate()) }} · 行情時間 {{ quoteSourceTime() }} · 取得於 {{ quoteFetchedAt() }}（台北）。{{ quoteSource() === 'MIS' ? 'MIS 輪詢快照，可能延遲，非逐筆即時串流。' : '歷史日行情，非盤中即時報價。' }}</p>
@@ -459,7 +459,7 @@
             </label>
             <label class="field">
               <span>股數</span>
-              <input aria-label="股數" [attr.aria-invalid]="!!orderFieldError('shares')" [attr.aria-describedby]="orderFieldError('shares') ? 'shares-input-error' : null" type="number" [value]="positionForm().shares" [min]="shareUnit() === 'boardLot' ? 1000 : 1" [max]="shareUnit() === 'oddLot' ? 999 : null" [step]="shareUnit() === 'boardLot' ? 1000 : 1" (input)="onPositionFieldChange('shares', +($any($event.target).value || 1))" />
+              <input aria-label="股數" [attr.aria-invalid]="!!orderFieldError('shares')" [attr.aria-describedby]="orderFieldError('shares') ? 'shares-input-error' : null" type="number" [value]="positionForm().shares" [min]="shareUnit() === 'boardLot' ? 1000 : 1" [max]="shareUnit() === 'oddLot' ? 999 : null" [step]="shareUnit() === 'boardLot' ? 1000 : 1" (input)="onPositionFieldChange('shares', +($any($event.target).value || 0))" />
             @if (orderFieldError('shares')) { <small id="shares-input-error" class="error-text" role="alert">{{ orderFieldError('shares') }}</small> }</label>
             <label class="field">
               <span>{{ orderEntryMode() === 'holding' ? '成交價' : '委託價' }}</span>
@@ -472,7 +472,9 @@
               @if (presetOrderAction() === 'buy') {
               <label class="field"><span>預計出場價（選填）</span><input [attr.aria-invalid]="orderEntryMode() === 'preset' && pricePlanningError().includes('目標') ? true : null" [attr.aria-describedby]="orderEntryMode() === 'preset' && pricePlanningError().includes('目標') ? 'targetPrice-error' : null" type="number" [value]="positionForm().targetPrice || ''" min="0.01" placeholder="可留空" (input)="onPositionFieldChange('targetPrice', +($any($event.target).value || 0))" />@if (orderEntryMode() === 'preset' && pricePlanningError().includes('目標')) { <small id="targetPrice-error" class="error-text" role="alert">{{ pricePlanningError() }}</small> }@if (orderFieldError('targetPrice')) { <small id="targetPrice-input-error" class="error-text" role="alert">{{ orderFieldError('targetPrice') }}</small> }</label>
               }
-              <label class="field"><span>待成交委託有效日</span><small>首個可交易日起 5 日，排除週末及已知休市日</small><small>日期格式：YYYY/MM/DD</small><input type="date" [min]="presetDateMin" [max]="presetDateMax" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
+              <label class="field"><span>預計交易日</span><input aria-label="預計交易日" type="date" [value]="plannedTradeDate()" (change)="plannedTradeDate.set($any($event.target).value)" /></label>
+              <label class="field"><span>預估持有天數（日曆日）</span><input aria-label="預估持有天數" type="number" min="1" step="1" [value]="estimatedHoldingDays()" (input)="estimatedHoldingDays.set(+$any($event.target).value)" /></label>
+              <label class="field"><span>有效至</span><small>有效至是委託期限，與預估出場日期分開</small><small>日期格式：YYYY/MM/DD</small><input type="date" aria-label="有效至" [value]="presetExpiryDate()" (change)="onPresetExpiryChange($any($event.target).value)" /></label>
               <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">日曆依證交所 2026 年開休市表（2026/10/09 核對），不自動包含颱風等臨時停市；仍需核對市場公告。</p></details>
               @if (calendarCoverageWarning()) { <p class="error-text">此日期範圍含未載入官方日曆的年份，目前僅排除週末，請自行核對有效日。</p> }
             }
@@ -483,7 +485,7 @@
           </div>
           @if (orderEntryMode() === 'preset' && presetOrderAction() === 'buy') { <button type="button" class="ghost-button" [disabled]="positionForm().entryPrice <= 0" (click)="resetDirectionPrices()">依{{ positionForm().type === '空單' || positionForm().type === '融券' ? '空單' : '多單' }}方向重設價格</button> }
           <button type="button" class="ghost-button" (click)="useCurrentMarketPrice()">帶入目前股價</button>
-          <p class="record-status">{{ positionForm().symbol }} · {{ positionForm().type }} · {{ positionForm().shares | number:'1.0-0' }} 股 × {{ positionForm().entryPrice | number:'1.0-2' }} 元 · 金額 {{ positionForm().shares * positionForm().entryPrice | number:'1.0-0' }} 元（未含交易成本）</p>
+          <p class="record-status">{{ positionForm().symbol }} · {{ positionForm().type }} · {{ positionForm().shares | number:'1.0-0' }} 股 × {{ positionForm().entryPrice | number:'1.0-2' }} 元 · 金額 {{ orderFormError() ? '無法計算' : (positionForm().shares * positionForm().entryPrice | number:'1.0-0') + ' 元' }}（未含交易成本）</p>
           @if (orderFormError() && !orderFieldError('symbol') && !orderFieldError('entryPrice') && !orderFieldError('shares') && !orderFieldError('stopLossPrice') && !orderFieldError('targetPrice')) { <p class="error-text" role="alert">{{ orderFormError() }}</p> }
           @if (orderEntryMode() === 'preset' && presetOrderAction() === 'sell') {
             <p class="record-status">{{ positionForm().type }} 持倉 {{ matchingSellHoldings() }} 股 · 其他有效賣出單 {{ reservedSellShares() }} 股 · 本單可委託 {{ availableSellOrderShares() }} 股</p>
@@ -496,16 +498,16 @@
               <div><span>停損預估損失</span><strong class="negative">{{ proposedOrderRisk() === null ? '無法計算' : (proposedOrderRisk() | number:'1.0-0') }}</strong></div>
               <div><span>目標預估淨損益</span><strong [class.negative]="(proposedOrderReward() ?? 0) < 0">{{ proposedOrderReward() === null ? '無法計算' : (proposedOrderReward() | number:'1.0-0') }}</strong></div>
               <div><span>風險報酬比</span><strong>{{ proposedRiskRewardRatio() === null ? '無法計算' : (proposedRiskRewardRatio() | number:'1.2-2') }}</strong></div>
-              <div><span>依風險上限建議</span><strong>{{ suggestedRiskShares() | number:'1.0-0' }} 股</strong></div>
+              <div><span>依風險上限建議</span><strong>{{ riskPerShare() === null ? '無法計算' : (suggestedRiskShares() | number:'1.0-0') + ' 股' }}</strong></div>
               <button type="button" class="ghost-button" [disabled]="suggestedRiskShares() <= 0" (click)="applySuggestedShares()">套用建議股數</button>
-              <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">股數受停損、資金及交易單位限制；資金按全名目金額加進場費估算，最低費依成本設定。不含滑價與跳空，非保證最大損失。</p></details>
+              <details class="calculation-notes"><summary>計算說明與限制</summary><p class="backtest-note">表單、委託卡片與 Excel 使用目前相同成本設定；手續費折數 {{ feeDiscount() }}，融資年率 {{ financingRate() }}%、融券年率 {{ shortBorrowRate() }}%，按 {{ planningDays() }} 個日曆日估算。先保留完整精度，再將網站損益取整元；有效至不代表出場日。缺停損時無法計算風險、風險報酬比及建議股數。</p><p class="backtest-note">股數受停損、資金及交易單位限制；資金按全名目金額加進場費估算，最低費依成本設定。不含滑價與跳空，非保證最大損失。</p></details>
               @if (!pricePlanningError() && suggestedRiskShares() === 0 && proposedStopLoss()) { <p class="error-text">預算不足目前交易單位；不足一張請切換零股或調整規劃。</p> }
             </div>
           }
           @if (orderEntryMode() === 'holding') {
             <button type="button" class="action-button" [disabled]="!!orderFormError()" (click)="addTradePosition()">{{ editingPositionId() ? '儲存持倉修改' : '新增已入倉股票' }}</button>
           } @else {
-            <button type="button" class="preset-button form-submit" [disabled]="!!orderFormError() || !!pricePlanningError()" (click)="createPresetOrderFromForm()">{{ editingPresetOrderId() ? '儲存待成交委託修改' : (presetOrderAction() === 'sell' ? '建立賣出委託' : positionForm().type === '空單' || positionForm().type === '融券' ? '建立放空委託' : '建立買進委託') }}</button>
+            <button type="button" class="preset-button form-submit" [disabled]="submittingOrder() || storageConflict() || !!orderFormError() || !!pricePlanningError()" (click)="createPresetOrderFromForm()">{{ editingPresetOrderId() ? '儲存待成交委託修改' : (presetOrderAction() === 'sell' ? '建立賣出委託' : positionForm().type === '空單' || positionForm().type === '融券' ? '建立放空委託' : '建立買進委託') }}</button>
           }
           }
         </div>
@@ -593,16 +595,31 @@
       @for (group of oversubscribedSellOrders(); track group.symbol + group.type) {
         <p class="error-text" role="alert">{{ group.symbol }} {{ group.type }} 的有效賣出委託 {{ group.reserved }} 股超過持倉 {{ group.held }} 股，請調整或取消委託。</p>
       }
-      @if (currentStockPresetOrders().length) {
+    <details class="export-settings">
+    <summary>待成交委託 Excel 匯出 <span>{{ excelPreview().count }} 筆可匯出</span></summary>
+    <div class="stock-record-heading" aria-label="待成交委託 Excel 匯出設定">
+      <div><strong>待成交委託 Excel</strong><p class="backtest-note">每個價位各列一筆，買進與賣出分開統計；委託金額未含成本；另列價差損益、預估淨損益與成本假設。</p></div>
+      <div class="panel-header-actions">
+        <label>預計交易日（空白不限）<input type="date" aria-label="匯出預計交易日" [value]="excelTradeDate()" (change)="excelTradeDate.set($any($event.target).value)" /></label><label>匯出範圍 <select [value]="excelScope()" [disabled]="exportingExcel()" (change)="excelScope.set($any($event.target).value)"><option value="all">全部股票</option><option value="current">目前股票 {{ stockSymbol() }}</option></select></label>
+        <label><input type="checkbox" [checked]="excelIncludeExpired()" [disabled]="exportingExcel()" (change)="excelIncludeExpired.set($any($event.target).checked)" /> 包含過期單</label>
+        <button type="button" class="save-workspace-button" [disabled]="exportingExcel() || !excelPreview().count" (click)="exportPresetOrdersExcel()">{{ exportingExcel() ? 'Excel 產生中…' : '匯出 Excel（' + excelPreview().count + ' 筆）' }}</button>
+      </div>
+    </div>
+    <p class="record-status" role="status">{{ excelPreview().count }} 筆 · {{ excelPreview().symbols }} 檔股票 · 買進委託金額 {{ excelPreview().buyAmount | number:'1.0-0' }} 元 · 賣出委託金額 {{ excelPreview().sellAmount | number:'1.0-0' }} 元</p>
+    @if (excelPreview().unknownExpiry) { <p class="backtest-note">{{ excelPreview().unknownExpiry }} 筆未設定有效日期，無法判定是否過期，仍會匯出。</p> }
+    @if (!excelPreview().count) { <p class="record-empty">目前範圍沒有可匯出的待成交委託，可切換股票範圍、勾選包含過期單，或先建立待成交委託。</p> }
+    </details>
+      @if (displayedPresetOrders().length) {
         <section class="preset-order-list" aria-label="近期待成交委託">
           <div class="preset-list-title"><h3>近期待成交委託</h3><span>虛線菱形已同步顯示於座標圖</span></div>
           @for (order of displayedPresetOrders(); track order.id) {
             <div class="preset-order-row">
-              <span class="preset-status">{{ order.action === 'sell' ? '預設賣出' : '預設買入' }}</span><strong>{{ stockLabel(order.symbol, stockNamesBySymbol()[order.symbol]) }} · {{ order.type }}</strong><span>委託 {{ order.entryPrice | number:'1.0-2' }}</span><span>{{ order.exitPrice ? ('預計出場 ' + (order.exitPrice | number:'1.0-2')) : '未設定出場價' }}</span><span>{{ order.shareUnit === 'oddLot' ? '零股' : '整張' }} · {{ order.shares | number:'1.0-0' }} 股</span><span>有效至 {{ order.expiryDate || order.validDays + ' 天' }}</span>
-              @if (order.action === 'sell' || order.exitPrice) { <strong [class.positive]="presetProfit(order) >= 0" [class.negative]="presetProfit(order) < 0">預估損益 {{ presetProfit(order) > 0 ? '+' : '' }}{{ presetProfit(order) | number:'1.0-0' }}</strong> }
+              <span class="preset-status">{{ order.action === 'sell' ? '預設賣出' : '預設買入' }}</span><strong>{{ stockLabel(order.symbol, stockNamesBySymbol()[order.symbol]) }} · {{ order.type }}</strong><span>委託 {{ order.entryPrice | number:'1.0-2' }}</span><span>{{ order.exitPrice ? ('預計出場 ' + (order.exitPrice | number:'1.0-2')) : '未設定出場價' }}</span><span>{{ order.shareUnit === 'oddLot' ? '零股' : '整張' }} · {{ order.shares | number:'1.0-0' }} 股</span><span>建立 {{ displayDate(order.createdAt) }} · 預計交易 {{ order.plannedTradeDate || '未設定（舊單）' }} · 有效至 {{ order.expiryDate || '未設定' }}</span><small>{{ order.action === 'sell' ? '成本按持倉日期截至今天及目前設定估算' : '成本按 ' + (order.estimatedHoldingDays ?? order.validDays) + ' 個日曆日及目前設定估算' }}</small>
+              <strong>預估淨損益 {{ presetProfit(order) === null ? '無法計算' : (presetProfit(order) | number:'1.0-0') + ' 元' }}</strong>
               @if (order.note) { <span>備註：{{ order.note }}</span> }
+              @if (order.estimatedHoldingDays === undefined && order.action !== 'sell') { <small>舊單沿用原天數作成本假設；可編輯確認持有天數，不會推測交易日。</small> }
               <button type="button" class="ghost-button" (click)="editPresetOrder(order)">編輯</button>
-              <span>{{ isPresetExpired(order) ? '已過期（不計入資金需求與壓力試算）' : '待成交' }}</span>
+              <span>{{ presetStatus(order) }}</span>
               <button type="button" class="ghost-button" (click)="startPresetFill(order)">記錄實際成交</button>
               @if (fillOrderId() === order.id) {
                 <div class="field-grid">
@@ -766,20 +783,7 @@
     }
 
 
-    <details class="export-settings">
-    <summary>待成交委託 Excel 匯出 <span>{{ excelPreview().count }} 筆可匯出</span></summary>
-    <div class="stock-record-heading" aria-label="待成交委託 Excel 匯出設定">
-      <div><strong>待成交委託 Excel</strong><p class="backtest-note">每個價位各列一筆，買進與賣出分開統計；金額未含交易成本。</p></div>
-      <div class="panel-header-actions">
-        <label>匯出範圍 <select [value]="excelScope()" [disabled]="exportingExcel()" (change)="excelScope.set($any($event.target).value)"><option value="all">全部股票</option><option value="current">目前股票 {{ stockSymbol() }}</option></select></label>
-        <label><input type="checkbox" [checked]="excelIncludeExpired()" [disabled]="exportingExcel()" (change)="excelIncludeExpired.set($any($event.target).checked)" /> 包含過期單</label>
-        <button type="button" class="save-workspace-button" [disabled]="exportingExcel() || !excelPreview().count" (click)="exportPresetOrdersExcel()">{{ exportingExcel() ? 'Excel 產生中…' : '匯出 Excel（' + excelPreview().count + ' 筆）' }}</button>
-      </div>
-    </div>
-    <p class="record-status" role="status">{{ excelPreview().count }} 筆 · {{ excelPreview().symbols }} 檔股票 · 買進委託金額 {{ excelPreview().buyAmount | number:'1.0-0' }} 元 · 賣出委託金額 {{ excelPreview().sellAmount | number:'1.0-0' }} 元</p>
-    @if (excelPreview().unknownExpiry) { <p class="backtest-note">{{ excelPreview().unknownExpiry }} 筆未設定有效日期，無法判定是否過期，仍會匯出。</p> }
-    @if (!excelPreview().count) { <p class="record-empty">目前範圍沒有可匯出的待成交委託，可切換股票範圍、勾選包含過期單，或先建立待成交委託。</p> }
-    </details>
+
 
     <div class="portfolio-controls">
       <label class="field"><span>可用現金</span><input type="number" min="0" [value]="availableCash()" (input)="updateNumericSetting('availableCash', $any($event.target).value)" /></label>

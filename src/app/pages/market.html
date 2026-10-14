@@ -184,7 +184,7 @@
               </td>
               <td>
                 @if (i.changePoints === null) {
-                  <span>不可比較</span><small>{{ i.comparisonReason }}</small>
+                  <span>不可比較</span>@if (comparable()) { <small>{{ i.comparisonReason }}</small> }
                 } @else {
                   <span>固定樣本 {{ i.comparisonStocks ?? i.total }}／{{ i.total }} 檔</span
                   ><span

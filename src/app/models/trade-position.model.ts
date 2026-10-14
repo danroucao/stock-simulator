@@ -50,6 +50,8 @@ export interface PresetFill {
 }
 
 export interface PresetOrder {
+  plannedTradeDate?: string;
+  estimatedHoldingDays?: number;
   reminderSource?:ReminderSource;
   note?: string;
   id: string;

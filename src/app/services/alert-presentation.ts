@@ -13,5 +13,5 @@ export function exclusionSummary(feed: AlertFeed) {
   return counts;
 }
 export function upperDistance(stock: AlertStock): number | undefined {
-  return stock.eligible && stock.upper && stock.close>0 && stock.close<=stock.upper ? (stock.upper/stock.close-1)*100 : undefined;
+  return stock.eligible && stock.range && stock.upper && stock.close>=stock.range.lower && stock.close<=stock.upper && ['整理中','回到原區間'].includes(stock.status) ? (stock.upper/stock.close-1)*100 : undefined;
 }

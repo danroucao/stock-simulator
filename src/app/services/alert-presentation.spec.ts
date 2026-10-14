@@ -7,8 +7,9 @@ describe('alert presentation',()=>{
   expect(exclusionSummary(feed)).toEqual({price:1,history:1,liquidity:2,missing:2});
  });
  it('uses the saved observation upper bound and hides ineligible or already broken ranges',()=>{
-  const stock={eligible:true,close:50,upper:52} as AlertStock;
+  const stock={eligible:true,close:50,upper:52,status:'整理中',range:{lower:47,upper:52}} as AlertStock;
   expect(upperDistance(stock)).toBeCloseTo(4);expect(upperDistance({...stock,close:52})).toBe(0);
   expect(upperDistance({...stock,close:53})).toBeUndefined();expect(upperDistance({...stock,eligible:false})).toBeUndefined();
+  expect(upperDistance({...stock,close:46,status:'跌破區間'})).toBeUndefined();
  });
 });

@@ -46,4 +46,7 @@ jobs:
           path: |
             tmp/full-market-audit.json
             tmp/market-pages-*.png
+            tmp/order-planning-*.png
+            tmp/ux-revision-*.png
+            tmp/screener-drawer-*.png
           if-no-files-found: ignore

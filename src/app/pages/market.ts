@@ -1,6 +1,7 @@
 import { Component, computed, inject, afterNextRender, Injector, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { RouterLink, Router, NavigationStart } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MarketStore } from '../services/market-store';
 import { amount } from '../services/market-presentation';
 
@@ -11,6 +12,9 @@ import { amount } from '../services/market-presentation';
   templateUrl: './market.html',
 })
 export class MarketPage {
+  private readonly router = inject(Router);
+  private departing = false;
+  private destroyed = false;
   readonly store = inject(MarketStore);
   readonly sort = this.store.heatSort;
   readonly query = signal('');
@@ -81,6 +85,9 @@ export class MarketPage {
     } catch {}
   };
   constructor() {
+    this.router.events.pipe(takeUntilDestroyed()).subscribe(event => {
+      if (event instanceof NavigationStart && event.url.split('?')[0] !== '/market') { this.onHide(); this.departing=true; }
+    });
     try {
       const view = JSON.parse(sessionStorage.getItem('stock-market-view-v1') || 'null');
       if (view) {
@@ -91,11 +98,13 @@ export class MarketPage {
       }
     } catch {}
     window.addEventListener('pagehide', this.onHide);
-    void this.store.load();
-    afterNextRender(() => window.scrollTo(0, this.store.marketScroll), { injector: this.injector });
+    void this.store.load().then(() => {
+      if (!this.destroyed) afterNextRender(() => { if (!this.destroyed) window.scrollTo(0, this.store.marketScroll); }, { injector:this.injector });
+    });
   }
   ngOnDestroy(): void {
-    this.onHide();
+    this.destroyed=true;
+    if (!this.departing) this.onHide();
     window.removeEventListener('pagehide', this.onHide);
   }
 }

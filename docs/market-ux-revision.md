@@ -1,6 +1,6 @@
-# 市場工作區第二輪修正（2026-10-13，本機）
+# 市場工作區第二輪修正（2026-10-13，已發布基準）
 
-本輪修改未發布、未推送，也未修改 repository variables、權限或 Cloudflare Worker。正式網站仍需另行發布這批變更。
+此 UX 修正已於 2026/10/13 經 PR #3 發布，遠端 CI、Pages 與正式網站桌面／手機驗證通過；詳見 pages-market-ux-release-20261013.md。未修改 repository variables、權限或 Cloudflare Worker。2026/10/14 後續修正另見交易與選股驗收文件，尚未發布。
 
 ## 篩選與返回
 
@@ -34,7 +34,7 @@
 
 [10/13 push 驗證](https://github.com/danroucao/stock-simulator/actions/runs/38401129592) 的 log 顯示台北 20:59 已取得 10/13 行情及 16 個事件，但提交與發布步驟依原規則跳過，沒有更新公開結果。當時可見的最近 [schedule 執行](https://github.com/danroucao/stock-simulator/actions/runs/38303518193) 在台北 10/13 04:20 啟動，發布 10/12 行情；未見當日晚間預期的 schedule run。僅憑這些紀錄無法斷言 GitHub 服務或權限的根因，且本輪未改遠端設定。
 
-本機 workflow 增加台北 19:20、20:20、21:20 三次機會，沿用既有發布開關與交易日判斷；不保證 GitHub 排程準時。來源交易統計落後預期日期時另提供 `dataDelay` 原因，仍顯示實際資料日期。此排程變更尚未部署。
+本機 workflow 增加台北 19:20、20:20、21:20 三次機會，沿用既有發布開關與交易日判斷；不保證 GitHub 排程準時。來源交易統計落後預期日期時另提供 `dataDelay` 原因，仍顯示實際資料日期。此排程變更已隨 PR #3 發布；尚未取得新版定時執行成功證據，不將 push 驗證誤稱定時更新成功。
 
 ## 實際驗證
 

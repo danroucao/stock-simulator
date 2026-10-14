@@ -72,7 +72,7 @@ try {
     await center.getByText(/行情落後預期交易日/).waitFor();
     result={...feed,events:[]}; await center.getByRole('button',{name:'重新讀取結果',exact:true}).click();
     await center.getByText('最新交易日沒有符合篩選的新增事件',{exact:true}).waitFor();
-    await center.getByRole('button',{name:'目前符合',exact:true}).click();
+    await center.getByRole('button',{name:'持續觀察',exact:true}).click();
     await waitRows(2);
     assert.equal(await center.locator('tbody tr').count(),2);
     await context.close();
